@@ -1,47 +1,46 @@
-version: "3.9"
-
 services:
-  gui:
+  # 1. PEER: Listener
+  peer-1:
     build: .
-    container_name: p2p-gui
-    environment:
-      - NODE_ROLE=GUI
-      - NODE_IP=10.10.10.2
-      - SUBNET_CIDR=10.10.10.0/28
+    container_name: peer-listener-1
     networks:
-      p2pnet:
-        ipv4_address: 10.10.10.2
+      - p2p-subnet
+    environment:
+      - INITIATOR=false
+    # BURASI YENİ: Senin klasörünü Docker'a bağlıyoruz
+    volumes:
+      - ./videolarim:/app/shared_videos
 
-  peer1:
+  # 2. PEER: Listener
+  peer-2:
     build: .
-    container_name: p2p-peer1
-    environment:
-      - NODE_ROLE=PEER
-      - PEER_ID=peer1
-      - NODE_IP=10.10.10.3
-      - SUBNET_CIDR=10.10.10.0/28
+    container_name: peer-listener-2
     networks:
-      p2pnet:
-        ipv4_address: 10.10.10.3
+      - p2p-subnet
+    environment:
+      - INITIATOR=false
+    # BURASI YENİ
+    volumes:
+      - ./videolarim:/app/shared_videos
 
-  peer2:
+  # 3. PEER: Initiator (Arayan)
+  peer-init:
     build: .
-    container_name: p2p-peer2
-    environment:
-      - NODE_ROLE=PEER
-      - PEER_ID=peer2
-      - NODE_IP=10.10.10.4
-      - SUBNET_CIDR=10.10.10.0/28
+    container_name: peer-initiator
     networks:
-      p2pnet:
-        ipv4_address: 10.10.10.4
-
-  # ... peer3..peer12 aynı mantık:
-  # peer12 -> 10.10.10.14
+      - p2p-subnet
+    environment:
+      - INITIATOR=true
+    depends_on:
+      - peer-1
+      - peer-2
+    # BURASI YENİ
+    volumes:
+      - ./videolarim:/app/shared_videos
 
 networks:
-  p2pnet:
+  p2p-subnet:
     driver: bridge
     ipam:
       config:
-        - subnet:
+        - subnet: 172.25.0.0/29

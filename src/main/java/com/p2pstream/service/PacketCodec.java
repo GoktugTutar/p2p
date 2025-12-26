@@ -2,10 +2,9 @@ package com.p2pstream.service;
 
 import com.p2pstream.model.Constants;
 import com.p2pstream.model.MessageType;
-import com.p2pstream.net.Packet;
+import com.p2pstream.net.udp.Packet;
 
 import java.io.*;
-import java.nio.ByteBuffer;
 import java.util.UUID;
 
 public final class PacketCodec {
