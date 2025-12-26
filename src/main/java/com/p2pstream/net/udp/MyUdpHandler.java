@@ -12,139 +12,90 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-// "UdpPacketHandler" interface'ini implements ettiğini varsayıyorum
 public class MyUdpHandler implements UdpPacketHandler {
 
-    // 1. Gerekli Servisler
     private final UdpSender udpSender;
-    private final FileService fileService; // ARTIK ENJEKTE EDİLDİ
-
-    // 2. Hafıza (Peer'lar ve Mesaj Geçmişi)
+    private final FileService fileService;
     private final Map<String, PeerInfo> knownPeers = new ConcurrentHashMap<>();
-    // Loop koruması için görülen mesaj ID'leri
     private final Set<UUID> seenMessages = Collections.newSetFromMap(new ConcurrentHashMap<>());
-
-    // 3. Kendi Kimlik Bilgilerimiz
     private final String myPeerId;
     private final String myIp;
     private final int myPort;
 
-    // CONSTRUCTOR GÜNCELLENDİ: FileService parametresi eklendi
     public MyUdpHandler(UdpSender udpSender, FileService fileService, String myPeerId, String myIp, int myPort) {
         this.udpSender = udpSender;
-        this.fileService = fileService; // Dışarıdan gelen hazır servisi alıyoruz
+        this.fileService = fileService;
         this.myPeerId = myPeerId;
         this.myIp = myIp;
         this.myPort = myPort;
     }
 
-    // --- DISCOVER MANTIĞI ---
-
     @Override
     public void handleDiscover(Packet packet, InetAddress sender, int senderPort) {
+        // (Burası aynı kalıyor, sadece SEARCH kısmındaki mantık DISCOVER için de geçerli olabilir ama şimdilik SEARCH'ü düzeltelim)
         try {
-            // A. DEDUPLICATION (Loop Koruması)
-            // Eğer bu mesajı daha önce gördüysek tekrar işleme
-            if (!seenMessages.add(packet.messageId)) {
-                return;
-            }
-
+            if (!seenMessages.add(packet.messageId)) return;
             String incomingPeerId = new String(packet.data);
-
-            // Kendi kendimize konuşmayalım
             if (incomingPeerId.equals(this.myPeerId)) return;
 
-            System.out.println("Keşif isteği alındı: " + sender.getHostAddress() + " ID: " + incomingPeerId);
+            System.out.println("Keşif isteği alındı: " + sender.getHostAddress());
+            knownPeers.put(incomingPeerId, new PeerInfo(incomingPeerId, sender.getHostAddress(), senderPort));
 
-            // Peer kaydet
-            PeerInfo info = new PeerInfo(incomingPeerId, sender.getHostAddress(), senderPort);
-            knownPeers.put(incomingPeerId, info);
+            Packet replyPacket = Packet.simpleText(MessageType.DISCOVER_REPLY, this.myIp, this.myPort, 0, this.myPeerId);
 
-            // Cevap ver (Unicast)
-            Packet replyPacket = Packet.simpleText(
-                    MessageType.DISCOVER_REPLY,
-                    this.myIp,
-                    this.myPort,
-                    0,
-                    this.myPeerId
-            );
-            udpSender.send(PacketCodec.encode(replyPacket), sender, senderPort);
+            // DİKKAT: Discover reply için de packet.myPort kullanmak daha garantidir
+            udpSender.send(PacketCodec.encode(replyPacket), sender, packet.myPort);
 
-            // Flooding (Yayma)
             if (packet.ttl > 0) {
-                Packet forwardPacket = new Packet(
-                        packet.messageId, // ID korunmalı
-                        packet.messageType,
-                        packet.myIp,
-                        packet.myPort,
-                        packet.ttl - 1,   // TTL azaltıldı
-                        packet.data
-                );
-                udpSender.sendToAllLocalSubnets(PacketCodec.encode(forwardPacket), Constants.UDP_PORT);
-                System.out.println("Keşif paketi yayılıyor (Flooding), Yeni TTL: " + (packet.ttl - 1));
+                Packet forward = new Packet(packet.messageId, packet.messageType, packet.myIp, packet.myPort, packet.ttl - 1, packet.data);
+                udpSender.sendToAllLocalSubnets(PacketCodec.encode(forward), Constants.UDP_PORT);
             }
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        } catch (Exception e) { e.printStackTrace(); }
     }
 
     @Override
     public void handleDiscoverReply(Packet packet, InetAddress sender, int senderPort) {
         String incomingPeerId = new String(packet.data);
-        if (incomingPeerId.equals(this.myPeerId)) return;
-
-        System.out.println("Keşif cevabı (REPLY) geldi: " + sender.getHostAddress());
-        PeerInfo info = new PeerInfo(incomingPeerId, sender.getHostAddress(), senderPort);
-        knownPeers.put(incomingPeerId, info);
+        if (!incomingPeerId.equals(this.myPeerId)) {
+            System.out.println("Keşif cevabı (REPLY) geldi: " + sender.getHostAddress());
+            knownPeers.put(incomingPeerId, new PeerInfo(incomingPeerId, sender.getHostAddress(), senderPort));
+        }
     }
 
-    // --- SEARCH MANTIĞI ---
-
+    // --- KRİTİK DÜZELTME BURADA ---
     @Override
     public void handleSearch(Packet packet, InetAddress sender, int senderPort) {
         try {
-            // 1. DEDUPLICATION: Mesaj daha önce işlendi mi?
-            if (!seenMessages.add(packet.messageId)) {
-                return;
-            }
+            if (!seenMessages.add(packet.messageId)) return;
 
             String query = new String(packet.data, StandardCharsets.UTF_8);
             System.out.println("Arama isteği alındı: '" + query + "' Kimden: " + sender.getHostAddress());
 
-            // 2. LOCAL SEARCH: Hazır olan fileService üzerinden arama yap
-            // (Artık new FileService() yapmıyoruz)
             List<VideoMetadata> results = fileService.searchFiles(query);
 
             if (!results.isEmpty()) {
                 System.out.println("Eşleşen dosya bulundu! Adet: " + results.size());
 
                 for (VideoMetadata meta : results) {
-                    // Cevap formatı: HASH:FILENAME:SIZE
                     String responsePayload = meta.getFileHash() + ":" + meta.getFileName() + ":" + meta.getFileSize();
 
                     Packet reply = Packet.simpleText(
                             MessageType.SEARCH_REPLY,
                             this.myIp,
                             this.myPort,
-                            0, // Reply direkt gider
+                            0,
                             responsePayload
                     );
 
-                    // Bulan peer, Arayan peer'a unicast cevap döner
-                    udpSender.send(PacketCodec.encode(reply), sender, senderPort);
+                    // ESKİSİ (HATA): udpSender.send(..., sender, senderPort);
+                    // YENİSİ (DOĞRU): Cevabı, paketin içinde yazan ASIL dinleme portuna (50000) atıyoruz.
+                    udpSender.send(PacketCodec.encode(reply), sender, packet.myPort);
                 }
             }
 
-            // 3. FLOODING: Paketi yay
             if (packet.ttl > 0) {
                 Packet forwardPacket = new Packet(
-                        packet.messageId,
-                        packet.messageType,
-                        packet.myIp,
-                        packet.myPort,
-                        packet.ttl - 1,
-                        packet.data
+                        packet.messageId, packet.messageType, packet.myIp, packet.myPort, packet.ttl - 1, packet.data
                 );
                 udpSender.sendToAllLocalSubnets(PacketCodec.encode(forwardPacket), Constants.UDP_PORT);
                 System.out.println("Arama paketi yayılıyor (Flooding), TTL: " + (packet.ttl - 1));
@@ -157,13 +108,10 @@ public class MyUdpHandler implements UdpPacketHandler {
 
     @Override
     public void handleSearchReply(Packet packet, InetAddress sender, int senderPort) {
+        // İŞTE BU LOG ARTIK GÖRÜNECEK
         String payload = new String(packet.data, StandardCharsets.UTF_8);
-        System.out.println(">>> ARAMA SONUCU GELDİ <<<");
-        System.out.println("Kaynak: " + sender.getHostAddress());
-        System.out.println("Dosya Bilgisi: " + payload);
-    }
-
-    public Map<String, PeerInfo> getPeers() {
-        return knownPeers;
+        System.out.println(">>> ARAMA SONUCU GELDİ (BULUNDU!) <<<");
+        System.out.println("Kaynak Peer IP: " + sender.getHostAddress());
+        System.out.println("Dosya Detayı: " + payload);
     }
 }
