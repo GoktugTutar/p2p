@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.geometry.*?>
+
+<BorderPane xmlns="http://javafx.com/javafx"
+            xmlns:fx="http://javafx.com/fxml"
+            fx:controller="com.p2pstream.ui.MainWindowController">
+
+    <!-- Top Menu -->
+    <top>
+        <MenuBar>
+            <Menu text="Stream">
+                <MenuItem text="Connect" onAction="#onConnect"/>
+                <MenuItem text="Disconnect" onAction="#onDisconnect"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="Set Root Folder" onAction="#onSetRootFolder"/>
+                <MenuItem text="Set Buffer Folder" onAction="#onSetBufferFolder"/>
+                <SeparatorMenuItem/>
+                <MenuItem text="Exit" onAction="#onExit"/>
+            </Menu>
+            <Menu text="Help">
+                <MenuItem text="About" onAction="#onAbout"/>
+            </Menu>
+        </MenuBar>
+    </top>
+
+    <!-- Center -->
+    <center>
+        <SplitPane dividerPositions="0.30">
+            <!-- Left panel -->
+            <VBox spacing="8" padding="10">
+                <Label text="Available Videos on Network"/>
+                <TextField fx:id="searchField" promptText="Search..."/>
+                <Button text="Search" onAction="#onSearch" maxWidth="Infinity"/>
+                <Separator/>
+                <ListView fx:id="availableList" VBox.vgrow="ALWAYS"/>
+            </VBox>
+
+            <!-- Right panel -->
+            <VBox spacing="8" padding="10">
+                <Label text="Active Streams"/>
+                <TableView fx:id="activeTable" VBox.vgrow="ALWAYS">
+                    <columns>
+                        <TableColumn fx:id="colVideo" text="Video" prefWidth="260"/>
+                        <TableColumn fx:id="colPeer" text="Source Peer" prefWidth="220"/>
+                        <TableColumn fx:id="colProgress" text="Progress %" prefWidth="120"/>
+                        <TableColumn fx:id="colStatus" text="Status" prefWidth="180"/>
+                    </columns>
+                </TableView>
+
+                <Label text="Player"/>
+                <StackPane fx:id="playerContainer" prefHeight="260"/>
+            </VBox>
+        </SplitPane>
+    </center>
+
+    <!-- Bottom -->
+    <bottom>
+        <VBox spacing="6" padding="10">
+            <Label text="Event Log"/>
+            <TextArea fx:id="logArea" editable="false" prefRowCount="6"/>
+            <HBox spacing="10" alignment="CENTER_LEFT">
+                <Label text="Global Buffer Status"/>
+                <ProgressBar fx:id="bufferBar" prefWidth="500"/>
+            </HBox>
+        </VBox>
+    </bottom>
+
+</BorderPane>

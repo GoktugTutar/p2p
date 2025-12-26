@@ -1,0 +1,182 @@
+services:
+  seed:
+    build: .
+    container_name: peer-seed
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/seed/root:/data/root
+      - ./docker_data/seed/buffer:/data/buffer
+    networks:
+      subnetA:
+        ipv4_address: 172.20.1.10
+      subnetB:
+        ipv4_address: 172.20.2.10
+
+  peer1:
+    build: .
+    container_name: peer1
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer1/root:/data/root
+      - ./docker_data/peer1/buffer:/data/buffer
+    networks:
+      subnetA:
+        ipv4_address: 172.20.1.11
+
+  peer2:
+    build: .
+    container_name: peer2
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer2/root:/data/root
+      - ./docker_data/peer2/buffer:/data/buffer
+    networks:
+      subnetA:
+        ipv4_address: 172.20.1.12
+
+  peer3:
+    build: .
+    container_name: peer3
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer3/root:/data/root
+      - ./docker_data/peer3/buffer:/data/buffer
+    networks:
+      subnetA:
+        ipv4_address: 172.20.1.13
+
+  peer4:
+    build: .
+    container_name: peer4
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer4/root:/data/root
+      - ./docker_data/peer4/buffer:/data/buffer
+    networks:
+      subnetA:
+        ipv4_address: 172.20.1.14
+
+  peer5:
+    build: .
+    container_name: peer5
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer5/root:/data/root
+      - ./docker_data/peer5/buffer:/data/buffer
+    networks:
+      subnetA:
+        ipv4_address: 172.20.1.15
+
+  peer6:
+    build: .
+    container_name: peer6
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer6/root:/data/root
+      - ./docker_data/peer6/buffer:/data/buffer
+    networks:
+      subnetA:
+        ipv4_address: 172.20.1.16
+
+  peer7:
+    build: .
+    container_name: peer7
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer7/root:/data/root
+      - ./docker_data/peer7/buffer:/data/buffer
+    networks:
+      subnetB:
+        ipv4_address: 172.20.2.11
+
+  peer8:
+    build: .
+    container_name: peer8
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer8/root:/data/root
+      - ./docker_data/peer8/buffer:/data/buffer
+    networks:
+      subnetB:
+        ipv4_address: 172.20.2.12
+
+  peer9:
+    build: .
+    container_name: peer9
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer9/root:/data/root
+      - ./docker_data/peer9/buffer:/data/buffer
+    networks:
+      subnetB:
+        ipv4_address: 172.20.2.13
+
+  peer10:
+    build: .
+    container_name: peer10
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer10/root:/data/root
+      - ./docker_data/peer10/buffer:/data/buffer
+    networks:
+      subnetB:
+        ipv4_address: 172.20.2.14
+
+  peer11:
+    build: .
+    container_name: peer11
+    environment:
+      - MODE=HEADLESS
+      - ROOT_FOLDER=/data/root
+      - BUFFER_FOLDER=/data/buffer
+    volumes:
+      - ./docker_data/peer11/root:/data/root
+      - ./docker_data/peer11/buffer:/data/buffer
+    networks:
+      subnetB:
+        ipv4_address: 172.20.2.15
+
+networks:
+  subnetA:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.1.0/24
+  subnetB:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.2.0/24
