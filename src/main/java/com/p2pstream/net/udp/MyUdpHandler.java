@@ -11,6 +11,7 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 public class MyUdpHandler implements UdpPacketHandler {
 
@@ -21,13 +22,20 @@ public class MyUdpHandler implements UdpPacketHandler {
     private final String myPeerId;
     private final String myIp;
     private final int myPort;
+    private final Consumer<String> logger;
 
     public MyUdpHandler(UdpSender udpSender, FileService fileService, String myPeerId, String myIp, int myPort) {
+        this(udpSender, fileService, myPeerId, myIp, myPort, System.out::println);
+    }
+
+    public MyUdpHandler(UdpSender udpSender, FileService fileService, String myPeerId, String myIp, int myPort,
+                        Consumer<String> logger) {
         this.udpSender = udpSender;
         this.fileService = fileService;
         this.myPeerId = myPeerId;
         this.myIp = myIp;
         this.myPort = myPort;
+        this.logger = logger == null ? System.out::println : logger;
     }
 
     @Override
@@ -38,7 +46,7 @@ public class MyUdpHandler implements UdpPacketHandler {
             String incomingPeerId = new String(packet.data);
             if (incomingPeerId.equals(this.myPeerId)) return;
 
-            System.out.println("Keşif isteği alındı: " + sender.getHostAddress());
+            log("Keşif isteği alındı: " + sender.getHostAddress());
             knownPeers.put(incomingPeerId, new PeerInfo(incomingPeerId, sender.getHostAddress(), senderPort));
 
             Packet replyPacket = Packet.simpleText(MessageType.DISCOVER_REPLY, this.myIp, this.myPort, 0, this.myPeerId);
@@ -57,7 +65,7 @@ public class MyUdpHandler implements UdpPacketHandler {
     public void handleDiscoverReply(Packet packet, InetAddress sender, int senderPort) {
         String incomingPeerId = new String(packet.data);
         if (!incomingPeerId.equals(this.myPeerId)) {
-            System.out.println("Keşif cevabı (REPLY) geldi: " + sender.getHostAddress());
+            log("Keşif cevabı (REPLY) geldi: " + sender.getHostAddress());
             knownPeers.put(incomingPeerId, new PeerInfo(incomingPeerId, sender.getHostAddress(), senderPort));
         }
     }
@@ -69,12 +77,12 @@ public class MyUdpHandler implements UdpPacketHandler {
             if (!seenMessages.add(packet.messageId)) return;
 
             String query = new String(packet.data, StandardCharsets.UTF_8);
-            System.out.println("Arama isteği alındı: '" + query + "' Kimden: " + sender.getHostAddress());
+            log("Arama isteği alındı: '" + query + "' Kimden: " + sender.getHostAddress());
 
             List<VideoMetadata> results = fileService.searchFiles(query);
 
             if (!results.isEmpty()) {
-                System.out.println("Eşleşen dosya bulundu! Adet: " + results.size());
+                log("Eşleşen dosya bulundu! Adet: " + results.size());
 
                 for (VideoMetadata meta : results) {
                     String responsePayload = meta.getFileHash() + ":" + meta.getFileName() + ":" + meta.getFileSize();
@@ -98,7 +106,7 @@ public class MyUdpHandler implements UdpPacketHandler {
                         packet.messageId, packet.messageType, packet.myIp, packet.myPort, packet.ttl - 1, packet.data
                 );
                 udpSender.sendToAllLocalSubnets(PacketCodec.encode(forwardPacket), Constants.UDP_PORT);
-                System.out.println("Arama paketi yayılıyor (Flooding), TTL: " + (packet.ttl - 1));
+                log("Arama paketi yayılıyor (Flooding), TTL: " + (packet.ttl - 1));
             }
 
         } catch (Exception e) {
@@ -110,8 +118,12 @@ public class MyUdpHandler implements UdpPacketHandler {
     public void handleSearchReply(Packet packet, InetAddress sender, int senderPort) {
         // İŞTE BU LOG ARTIK GÖRÜNECEK
         String payload = new String(packet.data, StandardCharsets.UTF_8);
-        System.out.println(">>> ARAMA SONUCU GELDİ (BULUNDU!) <<<");
-        System.out.println("Kaynak Peer IP: " + sender.getHostAddress());
-        System.out.println("Dosya Detayı: " + payload);
+        log(">>> ARAMA SONUCU GELDİ (BULUNDU!) <<<");
+        log("Kaynak Peer IP: " + sender.getHostAddress());
+        log("Dosya Detayı: " + payload);
+    }
+
+    private void log(String message) {
+        logger.accept(message);
     }
 }
