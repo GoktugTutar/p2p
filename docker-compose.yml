@@ -4,39 +4,51 @@ services:
     build: .
     container_name: peer-listener-1
     networks:
-      - p2p-subnet
+      p2p-subnet:
+        ipv4_address: 172.25.0.2
     environment:
       - INITIATOR=false
     # BURASI YENİ: Senin klasörünü Docker'a bağlıyoruz
     volumes:
       - ./videolarim:/app/shared_videos
+    ports:
+      - "50001:50000/udp"
 
   # 2. PEER: Listener
   peer-2:
     build: .
     container_name: peer-listener-2
     networks:
-      - p2p-subnet
+      p2p-subnet:
+        ipv4_address: 172.25.0.3
     environment:
       - INITIATOR=false
     # BURASI YENİ
     volumes:
       - ./videolarim:/app/shared_videos
+    ports:
+      - "50002:50000/udp"
 
   # 3. PEER: Initiator (Arayan)
   peer-init:
     build: .
     container_name: peer-initiator
     networks:
-      - p2p-subnet
+      p2p-subnet:
+        ipv4_address: 172.25.0.4
     environment:
       - INITIATOR=true
+      - SEARCH_QUERY=YTlogo
+    profiles:
+      - initiator
     depends_on:
       - peer-1
       - peer-2
     # BURASI YENİ
     volumes:
       - ./videolarim:/app/shared_videos
+    ports:
+      - "50003:50000/udp"
 
 networks:
   p2p-subnet:

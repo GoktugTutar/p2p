@@ -3,11 +3,10 @@ package com.p2pstream;
 import com.p2pstream.model.Constants;
 import com.p2pstream.model.MessageType;
 import com.p2pstream.net.udp.*;
+import com.p2pstream.gui.GuiPeerApp;
 import com.p2pstream.service.FileService;
 import com.p2pstream.service.PacketCodec;
 
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.net.InetAddress;
 import java.util.UUID;
 
@@ -29,6 +28,8 @@ public class Main {
             String peerId = UUID.randomUUID().toString();
             String myIp = InetAddress.getLocalHost().getHostAddress();
             int myPort = Constants.UDP_PORT;
+            boolean guiMode = Boolean.parseBoolean(System.getenv("GUI_MODE"));
+            String searchQuery = System.getenv("SEARCH_QUERY") == null ? "YTlogo" : System.getenv("SEARCH_QUERY");
 
             System.out.println("ID: " + peerId);
             System.out.println("IP: " + myIp);
@@ -36,11 +37,18 @@ public class Main {
             // 2. Ağ Bileşenlerinin Kurulumu
             UdpSender sender = new UdpSender();
             // Handler'a fileService'i veriyoruz ki arama gelince cevap verebilsin
-            MyUdpHandler handler = new MyUdpHandler(sender, fileService, peerId, myIp, myPort);
+            GuiPeerApp gui = guiMode ? new GuiPeerApp(peerId, myIp, myPort, sender, fileService, searchQuery) : null;
+            MyUdpHandler handler = new MyUdpHandler(sender, fileService, peerId, myIp, myPort,
+                    guiMode ? gui.uiLogger() : System.out::println);
             UdpServer server = new UdpServer(Constants.UDP_PORT, handler);
 
             // Sunucuyu başlat
             server.start();
+
+            if (guiMode && gui != null) {
+                gui.startUi();
+                return;
+            }
 
             // 3. Test Mantığı (INITIATOR ise Arama Yap)
             String isInitiator = System.getenv("INITIATOR");
@@ -52,8 +60,6 @@ public class Main {
 
                 System.out.println(">>> ARAMA BAŞLATILIYOR (SEARCH FLOOD) <<<");
 
-                // DEĞİŞİKLİK BURADA: Artık "video" değil, dosya adında geçen "YTlogo" kelimesini arıyoruz.
-                String searchQuery = "YTlogo";
                 System.out.println("Aranan kelime: '" + searchQuery + "'");
 
                 // SEARCH paketi hazırla

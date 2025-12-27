@@ -106,4 +106,9 @@ public class FileService {
     public VideoMetadata getFileByHash(String hash) {
         return localFiles.get(hash);
     }
+
+    @Override
+    public String toString() {
+        return rootFolder.toAbsolutePath().toString();
+    }
 }
