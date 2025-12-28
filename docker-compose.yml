@@ -1,5 +1,5 @@
 services:
-  # 1. WEB & GATEWAY PEER
+  # --- 1. GATEWAY (WEB GUI - 172.30.0.10) ---
   web-peer:
     build: .
     container_name: web-peer
@@ -7,14 +7,14 @@ services:
       p2pnet:
         ipv4_address: 172.30.0.10
     ports:
-      - "8080:8080"
+      - "8080:8080"      # Web Arayüzü
       - "50000:50000/udp"
     volumes:
       - ./storage/gateway:/app/shared_videos
-      - ./storage/gateway/buffer:/app/buffer  # <--- YENİ: Buffer Yolu
+      - ./storage/gateway/buffer:/app/buffer
       - ./web:/app/web
 
-  # 2. NODE PEER 1
+  # --- 2. NODE 1 (172.30.0.11) ---
   node-1:
     build: .
     container_name: node-1
@@ -23,10 +23,10 @@ services:
         ipv4_address: 172.30.0.11
     volumes:
       - ./storage/node1:/app/shared_videos
-      - ./storage/node1/buffer:/app/buffer    # <--- YENİ: Buffer Yolu
+      - ./storage/node1/buffer:/app/buffer
       - ./web:/app/web
 
-  # 3. NODE PEER 2
+  # --- 3. NODE 2 (172.30.0.12) ---
   node-2:
     build: .
     container_name: node-2
@@ -35,7 +35,43 @@ services:
         ipv4_address: 172.30.0.12
     volumes:
       - ./storage/node2:/app/shared_videos
-      - ./storage/node2/buffer:/app/buffer    # <--- YENİ: Buffer Yolu
+      - ./storage/node2/buffer:/app/buffer
+      - ./web:/app/web
+
+  # --- 4. NODE 3 (172.30.0.13) ---
+  node-3:
+    build: .
+    container_name: node-3
+    networks:
+      p2pnet:
+        ipv4_address: 172.30.0.13
+    volumes:
+      - ./storage/node3:/app/shared_videos
+      - ./storage/node3/buffer:/app/buffer
+      - ./web:/app/web
+
+  # --- 5. NODE 4 (172.30.0.14) ---
+  node-4:
+    build: .
+    container_name: node-4
+    networks:
+      p2pnet:
+        ipv4_address: 172.30.0.14
+    volumes:
+      - ./storage/node4:/app/shared_videos
+      - ./storage/node4/buffer:/app/buffer
+      - ./web:/app/web
+
+  # --- 6. NODE 5 (172.30.0.15) ---
+  node-5:
+    build: .
+    container_name: node-5
+    networks:
+      p2pnet:
+        ipv4_address: 172.30.0.15
+    volumes:
+      - ./storage/node5:/app/shared_videos
+      - ./storage/node5/buffer:/app/buffer
       - ./web:/app/web
 
 networks:
