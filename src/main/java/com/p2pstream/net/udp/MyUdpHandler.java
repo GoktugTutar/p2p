@@ -1,5 +1,6 @@
 package com.p2pstream.net.udp;
 
+import com.p2pstream.HeadlessPeer;
 import com.p2pstream.model.VideoMetadata;
 import com.p2pstream.model.Constants;
 import com.p2pstream.model.MessageType;
@@ -108,10 +109,22 @@ public class MyUdpHandler implements UdpPacketHandler {
 
     @Override
     public void handleSearchReply(Packet packet, InetAddress sender, int senderPort) {
-        // İŞTE BU LOG ARTIK GÖRÜNECEK
         String payload = new String(packet.data, StandardCharsets.UTF_8);
-        System.out.println(">>> ARAMA SONUCU GELDİ (BULUNDU!) <<<");
-        System.out.println("Kaynak Peer IP: " + sender.getHostAddress());
-        System.out.println("Dosya Detayı: " + payload);
+        System.out.println(">>> P2P SONUCU GELDİ: " + payload);
+
+        try {
+            // Payload Formatı: HASH:FILENAME:SIZE
+            String[] parts = payload.split(":");
+            if (parts.length >= 3) {
+                String hash = parts[0];
+                String fileName = parts[1];
+                long size = Long.parseLong(parts[2]);
+
+                // SONUCU WEB ARAYÜZÜNE İLET
+                HeadlessPeer.broadcastToWeb(fileName, size, hash, sender.getHostAddress());
+            }
+        } catch (Exception e) {
+            System.err.println("Web yayını hatası: " + e.getMessage());
+        }
     }
 }

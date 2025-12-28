@@ -1,46 +1,46 @@
 services:
-  # 1. PEER: Listener
-  peer-1:
+  # 1. WEB & GATEWAY PEER
+  web-peer:
     build: .
-    container_name: peer-listener-1
+    container_name: web-peer
     networks:
-      - p2p-subnet
-    environment:
-      - INITIATOR=false
-    # BURASI YENİ: Senin klasörünü Docker'a bağlıyoruz
+      p2pnet:
+        ipv4_address: 172.30.0.10
+    ports:
+      - "8080:8080"
+      - "50000:50000/udp"
     volumes:
-      - ./videolarim:/app/shared_videos
+      - ./storage/gateway:/app/shared_videos
+      - ./storage/gateway/buffer:/app/buffer  # <--- YENİ: Buffer Yolu
+      - ./web:/app/web
 
-  # 2. PEER: Listener
-  peer-2:
+  # 2. NODE PEER 1
+  node-1:
     build: .
-    container_name: peer-listener-2
+    container_name: node-1
     networks:
-      - p2p-subnet
-    environment:
-      - INITIATOR=false
-    # BURASI YENİ
+      p2pnet:
+        ipv4_address: 172.30.0.11
     volumes:
-      - ./videolarim:/app/shared_videos
+      - ./storage/node1:/app/shared_videos
+      - ./storage/node1/buffer:/app/buffer    # <--- YENİ: Buffer Yolu
+      - ./web:/app/web
 
-  # 3. PEER: Initiator (Arayan)
-  peer-init:
+  # 3. NODE PEER 2
+  node-2:
     build: .
-    container_name: peer-initiator
+    container_name: node-2
     networks:
-      - p2p-subnet
-    environment:
-      - INITIATOR=true
-    depends_on:
-      - peer-1
-      - peer-2
-    # BURASI YENİ
+      p2pnet:
+        ipv4_address: 172.30.0.12
     volumes:
-      - ./videolarim:/app/shared_videos
+      - ./storage/node2:/app/shared_videos
+      - ./storage/node2/buffer:/app/buffer    # <--- YENİ: Buffer Yolu
+      - ./web:/app/web
 
 networks:
-  p2p-subnet:
+  p2pnet:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.25.0.0/29
+        - subnet: 172.30.0.0/16

@@ -61,7 +61,7 @@ public class Main {
                         MessageType.SEARCH,
                         myIp,
                         myPort,
-                        5, // TTL
+                        2, // TTL
                         searchQuery // Payload: "YTlogo"
                 );
 

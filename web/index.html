@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Video Stream (CSE471)</title>
+    <style>
+        /* Modern Dark Tema */
+        :root { --bg: #1e1e1e; --panel: #252526; --border: #333; --text: #cccccc; --accent: #007acc; --success: #4ec9b0; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+        /* Layout */
+        .menubar { padding: 8px 15px; background: #333; display: flex; gap: 20px; font-size: 13px; border-bottom: 1px solid black; }
+
+        /* Dropdown Menu Stili */
+        .dropdown { position: relative; display: inline-block; cursor: pointer; }
+        .dropdown-content { display: none; position: absolute; background-color: #252526; min-width: 180px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5); z-index: 100; border: 1px solid #555; top: 100%; left: 0; }
+        .dropdown-content a { color: var(--text); padding: 8px 12px; text-decoration: none; display: block; font-size: 12px; }
+        .dropdown-content a:hover { background-color: var(--accent); color: white; }
+        .dropdown:hover .dropdown-content { display: block; }
+
+        .main-area { display: flex; flex: 1; overflow: hidden; }
+        .left-panel, .right-panel { padding: 10px; display: flex; flex-direction: column; }
+        .left-panel { flex: 6; border-right: 1px solid var(--border); }
+        .right-panel { flex: 4; background: var(--panel); }
+        .bottom-log { height: 150px; background: black; border-top: 1px solid var(--border); padding: 10px; font-family: monospace; font-size: 12px; color: #4ec9b0; overflow-y: auto; }
+
+        /* Components */
+        .panel-header { font-weight: bold; margin-bottom: 10px; color: white; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+        .search-row { display: flex; gap: 5px; margin-bottom: 10px; }
+        input { flex: 1; background: #3c3c3c; border: 1px solid #555; color: white; padding: 5px; }
+        button { background: var(--accent); color: white; border: none; padding: 5px 15px; cursor: pointer; }
+        button:disabled { background: #555; cursor: not-allowed; }
+
+        /* Table */
+        .table-wrap { flex: 1; overflow-y: auto; border: 1px solid var(--border); background: #2d2d2d; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { text-align: left; background: #333; padding: 5px; position: sticky; top: 0; }
+        td { padding: 5px; border-bottom: 1px solid #444; }
+        tr:hover { background: #444; cursor: pointer; }
+        .selected { background: #094771 !important; color: white; }
+
+        /* Status */
+        .status-dot { height: 10px; width: 10px; background-color: #555; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .online { background-color: #4ec9b0; }
+
+        /* Video */
+        #videoPlayer { width: 100%; background: black; display: none; margin-bottom: 10px; border: 1px solid #555; }
+    </style>
+</head>
+<body>
+
+<div class="menubar">
+    <div class="dropdown">
+        <span>Stream ▼</span>
+        <div class="dropdown-content">
+            <a onclick="connect()">Connect</a>
+            <a onclick="disconnect()">Disconnect</a>
+            <hr style="border:0; border-top:1px solid #555; margin:2px 0;">
+            <a onclick="alert('Docker ortamında klasörler sabittir.')">Set Root Video Folder...</a>
+            <a onclick="alert('Docker ortamında klasörler sabittir.')">Set Buffer Folder...</a>
+            <hr style="border:0; border-top:1px solid #555; margin:2px 0;">
+            <a onclick="window.close()">Exit</a>
+        </div>
+    </div>
+
+    <div class="dropdown">
+        <span>Help ▼</span>
+        <div class="dropdown-content">
+            <a onclick="alert('CSE471 P2P Project\nVideo Streaming Client')">About</a>
+        </div>
+    </div>
+
+    <div style="flex:1"></div>
+    <div style="display:flex; align-items:center;">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">Disconnected</span>
+    </div>
+</div>
+
+<div class="main-area">
+    <div class="left-panel">
+        <div class="panel-header">Search Videos</div>
+        <div class="search-row">
+            <input type="text" id="searchInput" placeholder="Enter keyword..." disabled>
+            <button id="searchBtn" onclick="doSearch()" disabled>Search</button>
+        </div>
+
+        <div class="panel-header">Available Videos (Unique Files)</div>
+        <div class="table-wrap">
+            <table id="resultTable">
+                <thead>
+                <tr>
+                    <th>File Name</th>
+                    <th>Size (Bytes)</th>
+                    <th>Peer IP</th>
+                    <th>Hash</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div style="margin-top:10px; text-align:right;">
+            <button id="dlBtn" onclick="downloadSelected()" disabled>Download Selected</button>
+        </div>
+    </div>
+
+    <div class="right-panel">
+        <div class="panel-header">Active Streams</div>
+
+        <video id="videoPlayer" controls></video>
+
+        <div class="table-wrap" style="max-height: 200px;">
+            <table id="activeTable">
+                <thead>
+                <tr>
+                    <th>Video</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="bottom-log" id="logs">
+    <div>> Application started. Please Connect via Stream menu.</div>
+</div>
+
+<script>
+    let ws;
+    let isConnected = false;
+    let selectedRowData = null;
+
+    // TEKİLLEŞTİRME İÇİN HASH SETİ
+    let foundHashes = new Set();
+
+    const logs = document.getElementById('logs');
+    const sInput = document.getElementById('searchInput');
+    const sBtn = document.getElementById('searchBtn');
+    const dlBtn = document.getElementById('dlBtn');
+    const statusText = document.getElementById('statusText');
+    const statusDot = document.getElementById('statusDot');
+
+    function log(msg) {
+        logs.innerHTML += `<div>> ${msg}</div>`;
+        logs.scrollTop = logs.scrollHeight;
+    }
+
+    function connect() {
+        if(isConnected) return;
+        log("Connecting to Overlay Network...");
+
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
+
+        ws.onopen = () => {
+            isConnected = true;
+            statusText.innerText = "Connected";
+            statusDot.classList.add("online");
+            sInput.disabled = false;
+            sBtn.disabled = false;
+            log("✅ Connected to Gateway Peer.");
+        };
+
+        ws.onclose = () => {
+            isConnected = false;
+            statusText.innerText = "Disconnected";
+            statusDot.classList.remove("online");
+            sInput.disabled = true;
+            sBtn.disabled = true;
+            dlBtn.disabled = true;
+            log("❌ Connection lost.");
+        };
+
+        ws.onmessage = (evt) => {
+            const data = JSON.parse(evt.data);
+            if(data.type === 'RESULT') handleResult(data);
+            else if(data.type === 'LOG') log(`SERVER: ${data.message}`);
+        };
+    }
+
+    function disconnect() {
+        if(ws) ws.close();
+    }
+
+    function doSearch() {
+        const q = sInput.value.trim();
+        if(!q) return;
+
+        // Tabloyu ve Hash Setini temizle (Yeni arama = Temiz sayfa)
+        document.querySelector('#resultTable tbody').innerHTML = "";
+        foundHashes.clear();
+
+        log(`Searching network for: "${q}"...`);
+        fetch(`/api/search?q=${q}`, {method: 'POST'});
+    }
+
+    function handleResult(file) {
+        // DUPLICATE KONTROLÜ (Hash aynıysa ekleme)
+        if (foundHashes.has(file.hash)) {
+            return;
+        }
+
+        // Yeni dosya, listeye ekle
+        foundHashes.add(file.hash);
+
+        log(`🔍 Found: ${file.fileName} (${file.peerIp})`);
+
+        const tbody = document.querySelector('#resultTable tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+                <td>${file.fileName}</td>
+                <td>${file.size}</td>
+                <td>${file.peerIp}</td>
+                <td>${file.hash.substring(0, 8)}...</td>
+            `;
+
+        tr.onclick = () => {
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+            tr.classList.add('selected');
+            selectedRowData = file;
+            dlBtn.disabled = false;
+        };
+        tbody.appendChild(tr);
+    }
+
+    function downloadSelected() {
+        if(!selectedRowData) return;
+        const file = selectedRowData;
+
+        log(`⬇️ Starting download: ${file.fileName}`);
+        fetch(`/api/download?ip=${file.peerIp}&file=${file.fileName}`, {method: 'POST'});
+
+        // Sağ tabloya ekle
+        const tbody = document.querySelector('#activeTable tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+                <td>${file.fileName}</td>
+                <td>Buffering...</td>
+                <td id="prog-${file.hash}">0%</td>
+            `;
+        tbody.appendChild(tr);
+
+        // Simülasyon
+        simulateDownload(file.hash, file.fileName);
+    }
+
+    function simulateDownload(hash, name) {
+        let p = 0;
+        const interval = setInterval(() => {
+            p += 10;
+            const cell = document.getElementById(`prog-${hash}`);
+            if(cell) cell.innerText = p + "%";
+
+            if(p === 20) {
+                log(`🎬 Auto-playing: ${name}`);
+                const v = document.getElementById('videoPlayer');
+                v.style.display = 'block';
+                v.src = `/api/watch/${name}`;
+                v.play();
+            }
+
+            if(p >= 100) {
+                clearInterval(interval);
+                log(`✅ Download complete: ${name}`);
+            }
+        }, 500);
+    }
+
+    // Enter tuşu
+    sInput.addEventListener("keypress", (e) => {
+        if(e.key === "Enter") doSearch();
+    });
+
+</script>
+</body>
+</html>
