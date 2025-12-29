@@ -1,11 +1,20 @@
 package com.p2pstream.net.tcp;
 
 import com.p2pstream.model.Constants;
+import com.p2pstream.model.VideoMetadata;
+import com.p2pstream.service.FileService;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 
 public class TcpServer extends Thread {
+
+    private final FileService fileService;
+
+    public TcpServer(FileService fileService) {
+        this.fileService = fileService;
+    }
+
     @Override
     public void run() {
         try (ServerSocket serverSocket = new ServerSocket(Constants.TCP_PORT)) {
@@ -26,10 +35,15 @@ public class TcpServer extends Thread {
             if (request == null) return;
 
             String[] parts = request.split(":");
-            String fileName = parts[0];
+            if (parts.length < 2) return;
+
+            String fileHash = parts[0];
             int chunkIndex = Integer.parseInt(parts[1]);
 
-            File file = new File(Constants.SHARED_FOLDER + "/" + fileName);
+            VideoMetadata meta = fileService.getFileByHash(fileHash);
+            if (meta == null) return;
+
+            File file = new File(Constants.SHARED_FOLDER + "/" + meta.getFileName());
             if (!file.exists()) return;
 
             try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
@@ -41,8 +55,9 @@ public class TcpServer extends Thread {
                 int bytesRead = raf.read(buffer);
 
                 if (bytesRead > 0) {
-                    // --- GECİKME AYARI ---
-                    try { Thread.sleep(3000); } catch (InterruptedException e) {}
+                    // Header: fileHash:chunkIndex:payloadLength\n
+                    String header = fileHash + ":" + chunkIndex + ":" + bytesRead + "\n";
+                    out.write(header.getBytes());
 
                     out.write(buffer, 0, bytesRead);
                     out.flush();

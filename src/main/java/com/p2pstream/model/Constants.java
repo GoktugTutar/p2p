@@ -13,4 +13,7 @@ public class Constants {
 
     // --- PDF GEREKSİNİMİ: 256 KB CHUNK SIZE ---
     public static final int CHUNK_SIZE = 256 * 1024; // 256 KB
+
+    // Başlatma tamponu: Kaç chunk dolunca oynatma başlasın?
+    public static final int BUFFER_READY_CHUNKS = 8;
 }
