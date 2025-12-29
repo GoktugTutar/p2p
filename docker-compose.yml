@@ -1,5 +1,5 @@
 version: "3.8"
-
+#dosyalar sabit docker olduğu için set folder yapamadım
 services:
   # ---------------------------------------------------------
   # NETWORK A (ESKİ AĞ) - 6 PEER (Node 1-6)
