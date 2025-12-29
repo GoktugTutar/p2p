@@ -209,7 +209,8 @@
         if(s) s.innerText = data.status;
         document.getElementById('globalBuffer').value = data.percent;
 
-        if(data.percent >= 10 && selectedRowData && selectedRowData.hash === data.hash) {
+        const readyToPlay = data.status && data.status.toLowerCase().startsWith('playing');
+        if(readyToPlay && selectedRowData && selectedRowData.hash === data.hash) {
             const ext = selectedRowData.fileName.split('.').pop().toLowerCase();
             const url = `/api/watch/${selectedRowData.fileName}`;
             document.getElementById('mediaPlaceholder').style.display = 'none';

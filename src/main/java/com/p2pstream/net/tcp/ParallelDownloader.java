@@ -4,11 +4,13 @@ import com.p2pstream.HeadlessPeer;
 import com.p2pstream.model.Constants;
 
 import java.io.*;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -22,13 +24,24 @@ public class ParallelDownloader implements Runnable {
     private final int totalChunks;
 
     private final ConcurrentHashMap<Integer, Boolean> downloadedChunks = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<Integer> chunkQueue = new ConcurrentLinkedQueue<>();
+    private final ConcurrentHashMap<Integer, Integer> retryCounter = new ConcurrentHashMap<>();
 
     public ParallelDownloader(String fileName, String fileHash, long totalSize, List<String> peerIps) {
         this.fileName = fileName;
         this.fileHash = fileHash;
         this.totalSize = totalSize;
-        this.peerIps = peerIps;
+        this.peerIps = new ArrayList<>(peerIps);
+        Collections.shuffle(this.peerIps);
         this.totalChunks = (int) Math.ceil((double) totalSize / Constants.CHUNK_SIZE);
+
+        int prioritized = Math.min(Constants.BUFFER_READY_CHUNKS, totalChunks);
+        for (int i = 0; i < prioritized; i++) {
+            chunkQueue.offer(i);
+        }
+        for (int i = prioritized; i < totalChunks; i++) {
+            chunkQueue.offer(i);
+        }
     }
 
     @Override
@@ -39,15 +52,14 @@ public class ParallelDownloader implements Runnable {
         System.out.println("    └─ Kaynaklar: " + peerIps);
 
         File bufferFile = new File(Constants.BUFFER_FOLDER + "/" + fileName);
-        ExecutorService executor = Executors.newFixedThreadPool(4); // 4 Paralel Kanal
+        int workerCount = Math.min(Math.max(4, peerIps.size()), totalChunks);
+        ExecutorService executor = Executors.newFixedThreadPool(workerCount);
 
         try (RandomAccessFile raf = new RandomAccessFile(bufferFile, "rw")) {
             raf.setLength(totalSize);
 
-            for (int i = 0; i < totalChunks; i++) {
-                final int chunkIndex = i;
-                String targetIp = peerIps.get(i % peerIps.size());
-                executor.submit(() -> downloadChunk(chunkIndex, targetIp, bufferFile));
+            for (int i = 0; i < workerCount; i++) {
+                executor.submit(() -> workerLoop(bufferFile));
             }
 
             executor.shutdown();
@@ -70,38 +82,107 @@ public class ParallelDownloader implements Runnable {
         } catch (Exception e) { e.printStackTrace(); }
     }
 
-    private void downloadChunk(int index, String ip, File bufferFile) {
-        if (downloadedChunks.containsKey(index)) return;
+    private void workerLoop(File bufferFile) {
+        while (hasWorkPending()) {
+            Integer chunkIndex = chunkQueue.poll();
+            if (chunkIndex == null) {
+                try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+                continue;
+            }
+            if (downloadedChunks.containsKey(chunkIndex)) {
+                continue;
+            }
 
-        try (Socket socket = new Socket(ip, Constants.TCP_PORT);
-             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-             InputStream in = socket.getInputStream()) {
+            int attempt = retryCounter.merge(chunkIndex, 1, Integer::sum);
+            String ip = peerIps.get((attempt - 1) % peerIps.size());
 
-            out.println(fileName + ":" + index);
-            byte[] data = in.readAllBytes();
+            boolean ok = downloadChunk(chunkIndex, ip, bufferFile);
+            if (!ok && attempt < peerIps.size() * 3) {
+                chunkQueue.offer(chunkIndex);
+            }
+        }
+    }
 
-            if (data.length > 0) {
-                synchronized (bufferFile) {
-                    try (RandomAccessFile raf = new RandomAccessFile(bufferFile, "rw")) {
-                        raf.seek((long) index * Constants.CHUNK_SIZE);
-                        raf.write(data);
-                    }
-                }
-                downloadedChunks.put(index, true);
+    private boolean hasWorkPending() {
+        if (downloadedChunks.size() >= totalChunks) return false;
+        if (!chunkQueue.isEmpty()) return true;
 
-                int percent = (downloadedChunks.size() * 100) / totalChunks;
-                String status = (percent > 10) ? "Playing" : "Buffering...";
-
-                // WEB ARAYÜZÜNE SIK BİLDİRİM YAP (Akıcı bar için)
-                HeadlessPeer.broadcastProgress(fileHash, percent, status);
-
-                // TERMİNALE SEYREK LOG BAS (Her %20'de bir)
-                if (percent > 0 && percent % 20 == 0 && downloadedChunks.size() % (totalChunks/5) == 0) {
-                    System.out.println("⏳  İlerleme: %" + percent + " (" + fileName + ")");
+        for (int i = 0; i < totalChunks; i++) {
+            if (!downloadedChunks.containsKey(i)) {
+                int attempt = retryCounter.getOrDefault(i, 0);
+                if (attempt < peerIps.size() * 3) {
+                    return true;
                 }
             }
-        } catch (IOException e) {
-            // Hata logunu basma, retry mekanizması halleder veya sessiz kalsın
         }
+        return false;
+    }
+
+    private boolean downloadChunk(int index, String ip, File bufferFile) {
+        if (downloadedChunks.containsKey(index)) return true;
+
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(ip, Constants.TCP_PORT), 2000);
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            InputStream in = socket.getInputStream();
+
+            out.println(fileHash + ":" + index);
+
+            String header = readLine(in);
+            if (header == null || header.isEmpty()) return false;
+
+            String[] tokens = header.split(":");
+            if (tokens.length < 3) return false;
+            String responseHash = tokens[0];
+            int chunkIndex = Integer.parseInt(tokens[1]);
+            int payloadLength = Integer.parseInt(tokens[2]);
+
+            if (!responseHash.equals(fileHash) || chunkIndex != index || payloadLength <= 0) return false;
+
+            byte[] payload = in.readNBytes(payloadLength);
+            if (payload.length != payloadLength) return false;
+
+            if (downloadedChunks.putIfAbsent(index, true) != null) {
+                return true; // Duplicate geldi, yazma.
+            }
+
+            synchronized (bufferFile) {
+                try (RandomAccessFile raf = new RandomAccessFile(bufferFile, "rw")) {
+                    raf.seek((long) index * Constants.CHUNK_SIZE);
+                    raf.write(payload);
+                }
+            }
+
+            reportProgress(ip);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private void reportProgress(String sourceIp) {
+        int downloaded = downloadedChunks.size();
+        int percent = (downloaded * 100) / totalChunks;
+        int bufferTarget = Math.min(Constants.BUFFER_READY_CHUNKS, totalChunks);
+        boolean readyToPlay = downloaded >= bufferTarget;
+        String status = readyToPlay ? "Playing" : "Buffering (" + downloaded + "/" + bufferTarget + ")";
+
+        String annotatedStatus = status + " via " + sourceIp + " [" + downloaded + "/" + totalChunks + " chunks]";
+        HeadlessPeer.broadcastProgress(fileHash, percent, annotatedStatus);
+
+        if (percent > 0 && percent % 20 == 0) {
+            System.out.println("⏳  İlerleme: %" + percent + " (" + fileName + ")");
+        }
+    }
+
+    private String readLine(InputStream in) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int b = -1;
+        while ((b = in.read()) != -1) {
+            if (b == '\n') break;
+            buffer.write(b);
+        }
+        if (buffer.size() == 0 && b == -1) return null;
+        return buffer.toString();
     }
 }

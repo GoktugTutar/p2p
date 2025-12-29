@@ -51,7 +51,7 @@ public class HeadlessPeer {
             udpServer = new UdpServer(Constants.UDP_PORT, udpHandler);
             udpServer.start();
 
-            new TcpServer().start();
+            new TcpServer(fileService).start();
 
             // --- WEB GUI ---
             try {
