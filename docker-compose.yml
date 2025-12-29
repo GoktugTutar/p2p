@@ -1,46 +1,185 @@
+version: "3.8"
+#dosyalar sabit docker olduğu için set folder yapamadım
 services:
-  # 1. PEER: Listener
-  peer-1:
-    build: .
-    container_name: peer-listener-1
-    networks:
-      - p2p-subnet
-    environment:
-      - INITIATOR=false
-    # BURASI YENİ: Senin klasörünü Docker'a bağlıyoruz
-    volumes:
-      - ./videolarim:/app/shared_videos
+  # ---------------------------------------------------------
+  # NETWORK A (ESKİ AĞ) - 6 PEER (Node 1-6)
+  # ---------------------------------------------------------
 
-  # 2. PEER: Listener
-  peer-2:
+  node-1:
     build: .
-    container_name: peer-listener-2
-    networks:
-      - p2p-subnet
+    container_name: node-1
     environment:
-      - INITIATOR=false
-    # BURASI YENİ
+      - PEER_NAME=Node-1
+    ports:
+      - "8081:8080"
     volumes:
-      - ./videolarim:/app/shared_videos
-
-  # 3. PEER: Initiator (Arayan)
-  peer-init:
-    build: .
-    container_name: peer-initiator
+      - ./storage/node1:/app/shared_videos
+      - ./web:/app/web
     networks:
-      - p2p-subnet
+      network-a:
+        ipv4_address: 172.30.0.11
+
+  node-2:
+    build: .
+    container_name: node-2
     environment:
+      - PEER_NAME=Node-2
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./storage/node2:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-a:
+        ipv4_address: 172.30.0.12
+
+  node-3:
+    build: .
+    container_name: node-3
+    environment:
+      - PEER_NAME=Node-3
+    ports:
+      - "8083:8080"
+    volumes:
+      - ./storage/node3:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-a:
+        ipv4_address: 172.30.0.13
+
+  node-4:
+    build: .
+    container_name: node-4
+    environment:
+      - PEER_NAME=Node-4
+    ports:
+      - "8084:8080"
+    volumes:
+      - ./storage/node4:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-a:
+        ipv4_address: 172.30.0.14
+
+  node-5:
+    build: .
+    container_name: node-5
+    environment:
+      - PEER_NAME=Node-5
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./storage/node5:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-a:
+        ipv4_address: 172.30.0.15
+
+  # ---------------------------------------------------------
+  # THE BRIDGE (KÖPRÜ) - NODE 6
+  # ---------------------------------------------------------
+  node-6:
+    build: .
+    container_name: node-6
+    environment:
+      - PEER_NAME=Node-6-Bridge
+    ports:
+      - "8086:8080"
+      - "50006:50001"
+    volumes:
+      - ./storage/node6:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-a:
+        ipv4_address: 172.30.0.16
+      network-b:
+        ipv4_address: 172.40.0.16
+
+  # ---------------------------------------------------------
+  # NETWORK B (YENİ AĞ) - 4 PEER (Node 7-10)
+  # ---------------------------------------------------------
+
+  node-7:
+    build: .
+    container_name: node-7
+    environment:
+      - PEER_NAME=Node-7
+    ports:
+      - "8087:8080"
+    volumes:
+      - ./storage/node7:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-b:
+        ipv4_address: 172.40.0.17
+
+  node-8:
+    build: .
+    container_name: node-8
+    environment:
+      - PEER_NAME=Node-8
+    ports:
+      - "8088:8080"
+    volumes:
+      - ./storage/node8:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-b:
+        ipv4_address: 172.40.0.18
+
+  node-9:
+    build: .
+    container_name: node-9
+    environment:
+      - PEER_NAME=Node-9
+    ports:
+      - "8089:8080"
+    volumes:
+      - ./storage/node9:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-b:
+        ipv4_address: 172.40.0.19
+
+  node-10:
+    build: .
+    container_name: node-10
+    environment:
+      - PEER_NAME=Node-10
       - INITIATOR=true
-    depends_on:
-      - peer-1
-      - peer-2
-    # BURASI YENİ
+    ports:
+      - "8090:8080"
     volumes:
-      - ./videolarim:/app/shared_videos
+      - ./storage/node10:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-b:
+        ipv4_address: 172.40.0.20
+
+  # WEB GUI PEER (guipeer klasörüne bağlanacak)
+  web-peer:
+    build: .
+    container_name: web-peer
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./storage/guipeer:/app/shared_videos
+      - ./web:/app/web
+    networks:
+      network-a:
+        ipv4_address: 172.30.0.10
+      #network-b:
+       # ipv4_address: 172.40.0.10
 
 networks:
-  p2p-subnet:
+  network-a:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.25.0.0/29
+        - subnet: 172.30.0.0/16
+
+  network-b:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.40.0.0/16

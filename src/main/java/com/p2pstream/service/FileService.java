@@ -56,7 +56,7 @@ public class FileService {
             String fileName = path.getFileName().toString();
 
             // Chunk sayısını hesapla (Boyut / 256KB)
-            int chunks = (int) Math.ceil((double) size / (256 * 1024));
+            int chunks = (int) Math.ceil((double) size / Constants.CHUNK_SIZE);
 
             // Hash hesapla (Zaman alabilir, büyük dosyalar için asenkron yapılabilir)
             String hash = calculateSha256(path);
@@ -105,5 +105,9 @@ public class FileService {
     // Hash ile dosya bulma (İndirme isteği geldiğinde lazım olacak)
     public VideoMetadata getFileByHash(String hash) {
         return localFiles.get(hash);
+    }
+
+    public Path resolvePath(VideoMetadata metadata) {
+        return rootFolder.resolve(metadata.getFileName());
     }
 }

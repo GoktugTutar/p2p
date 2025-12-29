@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P File Explorer</title>
+    <style>
+        /* Modern Dark Tema ve Layout */
+        :root { --bg: #1e1e1e; --panel: #252526; --border: #333; --text: #cccccc; --accent: #007acc; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+
+        /* --- MENÜ ÇUBUĞU --- */
+        .menubar { padding: 5px 10px; background: #333; display: flex; gap: 15px; font-size: 13px; border-bottom: 1px solid black; user-select: none; }
+        .menu-item { position: relative; cursor: pointer; padding: 5px 10px; }
+        .menu-item:hover { background-color: #555; color: white; }
+
+        /* Dropdown İçeriği */
+        .dropdown { display: none; position: absolute; left: 0; top: 100%; background-color: #252526; min-width: 200px; box-shadow: 0px 8px 16px rgba(0,0,0,0.5); border: 1px solid #444; z-index: 1000; }
+        .menu-item:hover .dropdown { display: block; }
+        .dropdown a { color: var(--text); padding: 8px 15px; text-decoration: none; display: block; font-size: 12px; }
+        .dropdown a:hover { background-color: var(--accent); color: white; }
+        .separator { border-top: 1px solid #444; margin: 4px 0; }
+
+        /* Ana Alanlar */
+        .main-area { display: flex; flex: 1; overflow: hidden; }
+        .left-panel { flex: 6; border-right: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+        .right-panel { flex: 4; background: var(--panel); padding: 10px; display: flex; flex-direction: column; }
+
+        /* Tablo ve Başlıklar */
+        .section-title { font-weight: bold; color: var(--accent); border-bottom: 1px solid var(--border); margin-bottom: 5px; padding-bottom: 2px; }
+        .table-wrap { flex: 1; overflow-y: auto; border: 1px solid var(--border); background: #2d2d2d; margin-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th { text-align: left; background: #333; padding: 4px; position: sticky; top: 0; }
+        td { padding: 4px; border-bottom: 1px solid #444; }
+        tr:hover { background: #444; cursor: pointer; }
+        .selected { background: #094771 !important; color: white; }
+
+        /* Medya ve Log */
+        .bottom-log { height: 100px; background: black; border-top: 1px solid var(--border); padding: 5px; font-family: monospace; font-size: 11px; color: #4ec9b0; overflow-y: auto; }
+        .media-container { width: 100%; background: black; border: 1px solid #555; min-height: 200px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+        video, img { width: 100%; max-height: 300px; display: none; }
+        input { background: #3c3c3c; border: 1px solid #555; color: white; padding: 4px; flex:1; }
+        button { background: var(--accent); color: white; border: none; padding: 4px 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="menubar">
+    <div class="menu-item">
+        Stream
+        <div class="dropdown">
+            <a onclick="connect()">Connect & Discover</a>
+            <a onclick="disconnect()">Disconnect</a>
+            <div class="separator"></div>
+            <a onclick="alert('Docker ortamında Root klasörü sabittir:\n/app/shared_videos')">Set Root Video Folder...</a>
+            <a onclick="alert('Docker ortamında Buffer klasörü sabittir:\n/app/buffer')">Set Buffer Folder...</a>
+            <div class="separator"></div>
+            <a onclick="window.close()">Exit</a>
+        </div>
+    </div>
+
+    <div class="menu-item">
+        Help
+        <div class="dropdown">
+            <a onclick="showAbout()">About</a>
+        </div>
+    </div>
+
+    <div style="flex:1"></div>
+    <span id="statusText" style="margin-right:10px; color:#555;">Disconnected</span>
+</div>
+
+<div class="main-area">
+    <div class="left-panel">
+        <div>
+            <div class="section-title">Search Results</div>
+            <div style="display:flex; gap:5px; margin-bottom:5px;">
+                <input type="text" id="searchInput" placeholder="Enter keyword..." disabled>
+                <button id="searchBtn" onclick="doSearch()" disabled>Search</button>
+            </div>
+            <div class="table-wrap" style="height: 150px; min-height:100px;">
+                <table id="searchTable">
+                    <thead><tr><th>File</th><th>Size</th><th>Source</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        <div style="display:flex; flex-direction:column; flex:1;">
+            <div class="section-title">All Network Files (Discovered)</div>
+            <div class="table-wrap">
+                <table id="discoverTable">
+                    <thead><tr><th>File</th><th>Size</th><th>Source</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div style="text-align:right;">
+                <button id="dlBtn" onclick="downloadSelected()" disabled>Download Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="right-panel">
+        <div class="section-title">Media Viewer</div>
+        <div class="media-container">
+            <video id="videoPlayer" controls muted playsinline></video>
+            <img id="imageViewer">
+            <div id="mediaPlaceholder" style="color:#666;">No media</div>
+        </div>
+        <div class="section-title">Transfers</div>
+        <div class="table-wrap">
+            <table id="activeTable">
+                <thead><tr><th>File</th><th>Status</th><th>Progress</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div>Buffer: <progress id="globalBuffer" value="0" max="100" style="width:100%"></progress></div>
+    </div>
+</div>
+
+<div class="bottom-log" id="logs"></div>
+
+<script>
+    let ws, selectedRowData = null;
+    let searchHashes = new Set();
+    let discoverHashes = new Set();
+    const logs = document.getElementById('logs');
+
+    function log(msg) { logs.innerHTML += `<div>> ${msg}</div>`; logs.scrollTop = logs.scrollHeight; }
+
+    function showAbout() {
+        alert("CSE471 P2P Video Streaming Project\n\nVersion: 1.0\nProtocol: UDP (Search) + TCP (Transfer)\nArchitecture: Dockerized P2P Mesh");
+    }
+
+    function connect() {
+        log("Connecting...");
+        ws = new WebSocket(`ws://${window.location.host}/ws`);
+        ws.onopen = () => {
+            document.getElementById('statusText').innerText = "Connected";
+            document.getElementById('statusText').style.color = "#4ec9b0";
+            document.getElementById('searchInput').disabled = false;
+            document.getElementById('searchBtn').disabled = false;
+            fetch('/api/connect', {method: 'POST'});
+            document.querySelector('#discoverTable tbody').innerHTML = "";
+            discoverHashes.clear();
+        };
+        ws.onmessage = (evt) => {
+            const data = JSON.parse(evt.data);
+            if(data.type === 'RESULT') handleResult(data);
+            else if(data.type === 'LOG') log(data.message);
+            else if(data.type === 'PROGRESS') updateProgress(data);
+        };
+    }
+
+    // --- GÜNCELLENEN KISIM: BACKEND ILE KONUŞAN DISCONNECT ---
+    function disconnect() {
+        if(ws) ws.close();
+
+        // 1. Sağ üstteki yazıyı güncelle
+        document.getElementById('statusText').innerText = "Disconnected";
+        document.getElementById('statusText').style.color = "#555";
+
+        // 2. Butonları devre dışı bırak
+        document.getElementById('searchInput').disabled = true;
+        document.getElementById('searchBtn').disabled = true;
+
+        // 3. Backend'e "Peer'ı Kapat/Durdur" emri gönder
+        fetch('/api/disconnect', {method: 'POST'})
+            .then(() => log("Backend disconnected."))
+            .catch(e => log("Error disconnecting backend"));
+    }
+    // ---------------------------------------------------------
+
+    function doSearch() {
+        const q = document.getElementById('searchInput').value;
+        document.querySelector('#searchTable tbody').innerHTML = "";
+        searchHashes.clear();
+        fetch(`/api/search?q=${q}`, {method: 'POST'});
+    }
+    function handleResult(file) {
+        let tableId, hashSet;
+        if (file.resultType === 'SEARCH_RESULT') { tableId = '#searchTable'; hashSet = searchHashes; }
+        else { tableId = '#discoverTable'; hashSet = discoverHashes; }
+        if (hashSet.has(file.hash)) return;
+        hashSet.add(file.hash);
+
+        const tbody = document.querySelector(tableId + ' tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${file.fileName}</td><td>${(file.size/1024).toFixed(1)} KB</td><td>${file.peerIp}</td>`;
+        tr.onclick = () => {
+            document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+            tr.classList.add('selected');
+            selectedRowData = file;
+            document.getElementById('dlBtn').disabled = false;
+        };
+        tbody.appendChild(tr);
+    }
+    function downloadSelected() {
+        if(!selectedRowData) return;
+        fetch(`/api/download?ip=${selectedRowData.peerIp}&file=${selectedRowData.fileName}&hash=${selectedRowData.hash}&size=${selectedRowData.size}`, {method: 'POST'});
+        const tbody = document.querySelector('#activeTable tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${selectedRowData.fileName}</td><td id="stat-${selectedRowData.hash}">Start</td><td id="prog-${selectedRowData.hash}">0%</td>`;
+        tbody.appendChild(tr);
+    }
+    function updateProgress(data) {
+        const p = document.getElementById(`prog-${data.hash}`);
+        const s = document.getElementById(`stat-${data.hash}`);
+        if(p) p.innerText = data.percent + "%";
+        if(s) s.innerText = data.status;
+        document.getElementById('globalBuffer').value = data.percent;
+
+        const readyToPlay = data.status && data.status.toLowerCase().startsWith('playing');
+        if(readyToPlay && selectedRowData && selectedRowData.hash === data.hash) {
+            const ext = selectedRowData.fileName.split('.').pop().toLowerCase();
+            const url = `/api/watch/${selectedRowData.fileName}`;
+            document.getElementById('mediaPlaceholder').style.display = 'none';
+            if(['mp4','webm'].includes(ext)) {
+                const v = document.getElementById('videoPlayer');
+                v.style.display = 'block';
+                if(!v.src.includes(url)) { v.src = url; v.play().catch(()=>{}); }
+            } else {
+                const i = document.getElementById('imageViewer');
+                i.style.display = 'block';
+                i.src = url;
+            }
+        }
+    }
+</script>
+</body>
+</html>

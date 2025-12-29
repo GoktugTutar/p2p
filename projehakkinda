@@ -1,0 +1,10 @@
+udp ile discover saerch yapılıyor 
+searchden gelen yani dosyaya sahip olan kişinin ipsi dönülüyor ve indirmek için
+tcp başlatılıyor
+
+web peerinin yani docker containerin içine giriyor- docker exec -it web-peer sh
+bu şkeilde dosya indirilmiş mi kontrol edebilrisin cd shared_videos - ls
+
+broadcast olayını kontrol et
+
+?????eğer peerda o dosya varsa bir daha diğer arkadaşlarında sende var mı demesin
