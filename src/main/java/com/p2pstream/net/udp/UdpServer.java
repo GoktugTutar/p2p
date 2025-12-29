@@ -61,6 +61,12 @@ public class UdpServer implements Runnable {
 
     private void routePacket(Packet packet, InetAddress sender, int senderPort) {
         switch (packet.messageType) {
+            // --- EKLENEN KISIM BAŞLANGIÇ ---
+            case HELLO:
+                handler.handleHello(packet, sender, senderPort);
+                break;
+            // --- EKLENEN KISIM BİTİŞ ---
+
             case DISCOVER:
                 handler.handleDiscover(packet, sender, senderPort);
                 break;

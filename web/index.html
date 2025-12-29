@@ -150,11 +150,26 @@
             else if(data.type === 'PROGRESS') updateProgress(data);
         };
     }
+
+    // --- GÜNCELLENEN KISIM: BACKEND ILE KONUŞAN DISCONNECT ---
     function disconnect() {
         if(ws) ws.close();
+
+        // 1. Sağ üstteki yazıyı güncelle
         document.getElementById('statusText').innerText = "Disconnected";
         document.getElementById('statusText').style.color = "#555";
+
+        // 2. Butonları devre dışı bırak
+        document.getElementById('searchInput').disabled = true;
+        document.getElementById('searchBtn').disabled = true;
+
+        // 3. Backend'e "Peer'ı Kapat/Durdur" emri gönder
+        fetch('/api/disconnect', {method: 'POST'})
+            .then(() => log("Backend disconnected."))
+            .catch(e => log("Error disconnecting backend"));
     }
+    // ---------------------------------------------------------
+
     function doSearch() {
         const q = document.getElementById('searchInput').value;
         document.querySelector('#searchTable tbody').innerHTML = "";

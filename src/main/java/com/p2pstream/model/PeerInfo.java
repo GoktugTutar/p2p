@@ -2,7 +2,8 @@ package com.p2pstream.model;
 
 import java.time.Instant;
 import java.util.Objects;
-
+//bu dosya kullanılmıyor çünkü
+//!! SADECE IP GEREKTIĞI ICIN KULLANMADIM MYUDPHANDLER DA
 public final class PeerInfo {
     private final String peerId;
     private final String ip;

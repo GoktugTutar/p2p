@@ -10,7 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.net.InetAddress;
 import java.util.UUID;
-
+//guisiz test için kullanılıyordu artık kullanılmıyor
 public class Main {
 
     public static void main(String[] args) {

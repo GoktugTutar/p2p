@@ -25,8 +25,14 @@ public class HeadlessPeer {
     public static final Set<WsContext> webClients = ConcurrentHashMap.newKeySet();
     public static final ConcurrentHashMap<String, Set<String>> searchResultsCache = new ConcurrentHashMap<>();
 
+    // 1. EKSİK OLAN KISIM BURASIYDI: Değişkeni sınıf seviyesinde tanımlıyoruz
+    private static UdpServer udpServer;
+
     public static void main(String[] args) {
         try {
+            System.setProperty("org.slf4j.simpleLogger.log.io.javalin", "off");
+            System.setProperty("org.slf4j.simpleLogger.log.org.eclipse.jetty", "off");
+
             System.out.println(">>> P2P CLIENT SYSTEM STARTED...");
 
             FileService fileService = new FileService("shared_videos");
@@ -40,7 +46,11 @@ public class HeadlessPeer {
             UdpSender udpSender = new UdpSender();
             MyUdpHandler udpHandler = new MyUdpHandler(udpSender, fileService, peerId, myIp, myPort);
 
-            new Thread(() -> { try { new UdpServer(Constants.UDP_PORT, udpHandler).start(); } catch (Exception e) {} }).start();
+            // 2. DEĞİŞİKLİK BURADA: Artık 'new Thread' içine gizlemiyoruz.
+            // Değişkene atayıp başlatıyoruz. (UdpServer.start() zaten kendi thread'ini açıyor)
+            udpServer = new UdpServer(Constants.UDP_PORT, udpHandler);
+            udpServer.start();
+
             new TcpServer().start();
 
             // --- WEB GUI ---
@@ -48,24 +58,48 @@ public class HeadlessPeer {
                 if (Files.exists(Paths.get("/app/web"))) {
                     Javalin app = Javalin.create(config -> {
                         config.staticFiles.add("/app/web", Location.EXTERNAL);
+                        config.showJavalinBanner = false;
                     }).start(8080);
 
-                    // 1. CONNECT API: Ağa bağlan ve Keşif (Discover) başlat
+                    // 1. CONNECT API
                     app.post("/api/connect", ctx -> {
-                        broadcastLog("Connecting & Discovering Network...");
-                        // DISCOVER paketi yayıyoruz (TTL 5)
-                        Packet p = Packet.simpleText(MessageType.DISCOVER, myIp, myPort, 5, "Hello");
+                        broadcastLog("Connecting... Sending HELLO to local subnet.");
+
+                        // Server durmuşsa tekrar başlat
+                        if (!udpServer.isRunning()) {
+                            udpServer.start();
+                            broadcastLog("UDP Server restarted.");
+                        }
+
+                        int ttl = Constants.ttl;
+                        Packet p = Packet.simpleText(MessageType.HELLO, myIp, myPort, ttl, "Hi");
                         udpSender.sendToAllLocalSubnets(PacketCodec.encode(p), Constants.UDP_PORT);
-                        ctx.result("Discovery Started");
+                        ctx.result("HELLO Broadcast Sent");
                     });
 
-                    // 2. SEARCH API: Sadece arama yapar
+                    // 3. EKSİK OLAN DISCONNECT API'Sİ
+                    app.post("/api/disconnect", ctx -> {
+                        broadcastLog("Disconnecting from network...");
+
+                        // Artık 'udpServer' değişkenine erişebiliyoruz!
+                        if (udpServer != null && udpServer.isRunning()) {
+                            udpServer.stop();
+                            System.out.println("⛔ UDP Server durduruldu (Disconnect isteği).");
+                        }
+                        ctx.result("Disconnected");
+                    });
+
+                    // 2. SEARCH API
                     app.post("/api/search", ctx -> {
+                        if (!udpServer.isRunning()) {
+                            ctx.status(400).result("Offline. Please connect first.");
+                            return;
+                        }
                         String query = ctx.queryParam("q");
-                        searchResultsCache.clear(); // Yeni arama için cache temizle
+                        searchResultsCache.clear();
                         broadcastLog("Searching network for: '" + query + "'");
-                        // SEARCH paketi yayıyoruz
-                        Packet p = Packet.simpleText(MessageType.SEARCH, myIp, myPort, 5, query);
+
+                        Packet p = Packet.simpleText(MessageType.SEARCH, myIp, myPort, Constants.ttl, query);
                         udpSender.sendToAllLocalSubnets(PacketCodec.encode(p), Constants.UDP_PORT);
                         ctx.result("OK");
                     });
@@ -79,7 +113,7 @@ public class HeadlessPeer {
                         Set<String> owners = searchResultsCache.getOrDefault(fileHash, new HashSet<>());
                         String fallbackIp = ctx.queryParam("ip");
                         if (fallbackIp != null) owners.add(fallbackIp);
-                        owners.remove(myIp); // Kendimizden indirmeyelim
+                        owners.remove(myIp);
 
                         if (owners.isEmpty()) {
                             ctx.status(400).result("No peers found.");
@@ -119,19 +153,14 @@ public class HeadlessPeer {
         } catch (Exception e) { e.printStackTrace(); }
     }
 
-    // --- GÜNCELLENEN METOD: 'resultType' eklendi ---
     public static void broadcastToWeb(String resultType, String fileName, long size, String hash, String peerIp) {
-        // Cache'e ekle
         searchResultsCache.computeIfAbsent(hash, k -> ConcurrentHashMap.newKeySet()).add(peerIp);
-
-        // JSON formatı: { type: "RESULT", resultType: "SEARCH_RESULT" veya "DISCOVER_RESULT", ... }
         sendJson(String.format(
                 "{\"type\":\"RESULT\", \"resultType\":\"%s\", \"fileName\":\"%s\", \"size\":%d, \"hash\":\"%s\", \"peerIp\":\"%s\"}",
                 resultType, fileName, size, hash, peerIp
         ));
     }
 
-    // IP Bulma Mantığı
     private static String getRealIp() {
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
