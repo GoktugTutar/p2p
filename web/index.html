@@ -3,225 +3,274 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2P File Explorer</title>
+    <title>P2P Video Streaming</title>
     <style>
-        /* Modern Dark Tema ve Layout */
-        :root { --bg: #1e1e1e; --panel: #252526; --border: #333; --text: #cccccc; --accent: #007acc; }
+        /* PDF Uyumlu Dark Tema */
+        :root { --bg: #1e1e1e; --panel: #252526; --border: #333; --text: #cccccc; --accent: #007acc; --success: #4ec9b0; }
         body { margin: 0; font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
 
-        /* --- MENÜ ÇUBUĞU --- */
-        .menubar { padding: 5px 10px; background: #333; display: flex; gap: 15px; font-size: 13px; border-bottom: 1px solid black; user-select: none; }
-        .menu-item { position: relative; cursor: pointer; padding: 5px 10px; }
-        .menu-item:hover { background-color: #555; color: white; }
+        /* Üst Menü */
+        .menubar { padding: 8px 15px; background: #333; display: flex; gap: 20px; font-size: 13px; border-bottom: 1px solid #111; user-select: none; }
+        .menu-item { cursor: pointer; color: #eee; }
+        .menu-item:hover { color: var(--accent); }
 
-        /* Dropdown İçeriği */
-        .dropdown { display: none; position: absolute; left: 0; top: 100%; background-color: #252526; min-width: 200px; box-shadow: 0px 8px 16px rgba(0,0,0,0.5); border: 1px solid #444; z-index: 1000; }
-        .menu-item:hover .dropdown { display: block; }
-        .dropdown a { color: var(--text); padding: 8px 15px; text-decoration: none; display: block; font-size: 12px; }
-        .dropdown a:hover { background-color: var(--accent); color: white; }
-        .separator { border-top: 1px solid #444; margin: 4px 0; }
-
-        /* Ana Alanlar */
+        /* Ana Düzen */
         .main-area { display: flex; flex: 1; overflow: hidden; }
-        .left-panel { flex: 6; border-right: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 10px; }
-        .right-panel { flex: 4; background: var(--panel); padding: 10px; display: flex; flex-direction: column; }
 
-        /* Tablo ve Başlıklar */
-        .section-title { font-weight: bold; color: var(--accent); border-bottom: 1px solid var(--border); margin-bottom: 5px; padding-bottom: 2px; }
-        .table-wrap { flex: 1; overflow-y: auto; border: 1px solid var(--border); background: #2d2d2d; margin-bottom: 10px; }
+        /* SOL PANEL (Listeler) */
+        .left-panel { flex: 4; border-right: 1px solid var(--border); padding: 10px; display: flex; flex-direction: column; gap: 10px; background: #1e1e1e; }
+
+        /* SAĞ PANEL (Player + Active Streams) */
+        .right-panel { flex: 6; background: #111; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+
+        /* Başlıklar */
+        .box-container { display: flex; flex-direction: column; border: 1px solid var(--border); background: var(--panel); border-radius: 4px; overflow: hidden; }
+        .box-title { font-weight: 600; color: #fff; background: #333; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+
+        /* Arama Kutusu */
+        .search-row { display: flex; gap: 5px; padding: 5px; border-bottom: 1px solid var(--border); background: #2d2d2d; }
+        input { flex: 1; background: #1e1e1e; border: 1px solid #444; color: white; padding: 4px 8px; font-size: 12px; }
+        button { background: #333; color: white; border: 1px solid #555; padding: 2px 12px; cursor: pointer; font-size: 11px; }
+        button:hover { background: var(--accent); border-color: var(--accent); }
+
+        /* Tablolar */
+        .table-scroll { flex: 1; overflow-y: auto; min-height: 100px; }
         table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        th { text-align: left; background: #333; padding: 4px; position: sticky; top: 0; }
-        td { padding: 4px; border-bottom: 1px solid #444; }
-        tr:hover { background: #444; cursor: pointer; }
+        th { text-align: left; background: #2d2d2d; padding: 5px; position: sticky; top: 0; color: #aaa; font-weight: normal; }
+        td { padding: 5px; border-bottom: 1px solid #333; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        tr:hover { background: #3e3e42; cursor: pointer; }
         .selected { background: #094771 !important; color: white; }
 
-        /* Medya ve Log */
-        .bottom-log { height: 100px; background: black; border-top: 1px solid var(--border); padding: 5px; font-family: monospace; font-size: 11px; color: #4ec9b0; overflow-y: auto; }
-        .media-container { width: 100%; background: black; border: 1px solid #555; min-height: 200px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
-        video, img { width: 100%; max-height: 300px; display: none; }
-        input { background: #3c3c3c; border: 1px solid #555; color: white; padding: 4px; flex:1; }
-        button { background: var(--accent); color: white; border: none; padding: 4px 10px; cursor: pointer; }
+        /* Video Alanı */
+        .media-wrapper { width: 100%; background: black; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+        video, img { width: 100%; max-height: 400px; display: none; }
+        .placeholder { color: #555; font-size: 12px; padding: 50px; }
+
+        /* İlerleme Çubuğu (YouTube Style) */
+        .dl-status { width: 100%; background: #222; padding: 8px 15px; box-sizing: border-box; border-top: 1px solid #333; display: none; }
+        .dl-header { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; color: #eee; }
+        .track { height: 4px; background: #444; width: 100%; border-radius: 2px; overflow: hidden; }
+        .fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+        .dl-details { font-size: 10px; color: #888; text-align: right; margin-top: 4px; font-family: monospace; }
+
+        /* Log */
+        .bottom-log { height: 100px; background: #000; border-top: 1px solid var(--border); padding: 5px; font-family: 'Consolas', monospace; font-size: 10px; color: var(--success); overflow-y: auto; }
     </style>
 </head>
 <body>
 
 <div class="menubar">
-    <div class="menu-item">
-        Stream
-        <div class="dropdown">
-            <a onclick="connect()">Connect & Discover</a>
-            <a onclick="disconnect()">Disconnect</a>
-            <div class="separator"></div>
-            <a onclick="alert('Docker ortamında Root klasörü sabittir:\n/app/shared_videos')">Set Root Video Folder...</a>
-            <a onclick="alert('Docker ortamında Buffer klasörü sabittir:\n/app/buffer')">Set Buffer Folder...</a>
-            <div class="separator"></div>
-            <a onclick="window.close()">Exit</a>
-        </div>
-    </div>
-
-    <div class="menu-item">
-        Help
-        <div class="dropdown">
-            <a onclick="showAbout()">About</a>
-        </div>
-    </div>
-
+    <div class="menu-item" onclick="connect()">Connect Network</div>
+    <div class="menu-item" onclick="disconnect()">Disconnect</div>
     <div style="flex:1"></div>
-    <span id="statusText" style="margin-right:10px; color:#555;">Disconnected</span>
+    <div id="statusBadge" style="color: #666;">OFFLINE</div>
 </div>
 
 <div class="main-area">
     <div class="left-panel">
-        <div>
-            <div class="section-title">Search Results</div>
-            <div style="display:flex; gap:5px; margin-bottom:5px;">
-                <input type="text" id="searchInput" placeholder="Enter keyword..." disabled>
-                <button id="searchBtn" onclick="doSearch()" disabled>Search</button>
+
+        <div class="box-container" style="flex: 1;">
+            <div class="box-title">Search Videos</div>
+            <div class="search-row">
+                <input type="text" id="searchInput" placeholder="Keyword..." disabled>
+                <button onclick="doSearch()" id="searchBtn" disabled>Search</button>
             </div>
-            <div class="table-wrap" style="height: 150px; min-height:100px;">
+            <div class="table-scroll">
                 <table id="searchTable">
                     <thead><tr><th>File</th><th>Size</th><th>Source</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
         </div>
-        <div style="display:flex; flex-direction:column; flex:1;">
-            <div class="section-title">All Network Files (Discovered)</div>
-            <div class="table-wrap">
+
+        <div class="box-container" style="flex: 2;">
+            <div class="box-title">Available Videos on Network (Discovered)</div>
+            <div class="table-scroll">
                 <table id="discoverTable">
                     <thead><tr><th>File</th><th>Size</th><th>Source</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
-            <div style="text-align:right;">
-                <button id="dlBtn" onclick="downloadSelected()" disabled>Download Selected</button>
+            <div style="padding: 5px; text-align: right; background: #2d2d2d; border-top: 1px solid #333;">
+                <button onclick="startDownload()" id="dlBtn" disabled>Download Selected</button>
             </div>
         </div>
     </div>
 
     <div class="right-panel">
-        <div class="section-title">Media Viewer</div>
-        <div class="media-container">
-            <video id="videoPlayer" controls muted playsinline></video>
-            <img id="imageViewer">
-            <div id="mediaPlaceholder" style="color:#666;">No media</div>
+
+        <div class="box-container" style="flex: 0 0 auto;">
+            <div class="box-title">Media Viewer</div>
+            <div class="media-wrapper">
+                <div id="placeholder" class="placeholder">No video selected</div>
+                <video id="videoPlayer" controls playsinline></video>
+                <img id="imageViewer">
+
+                <div id="dlStatus" class="dl-status">
+                    <div class="dl-header">
+                        <span id="currentFileName">filename.mp4</span>
+                        <span id="percentText">0%</span>
+                    </div>
+                    <div class="track"><div id="progBar" class="fill"></div></div>
+                    <div class="dl-details" id="sizeText">0 MB / 0 MB</div>
+                </div>
+            </div>
         </div>
-        <div class="section-title">Transfers</div>
-        <div class="table-wrap">
-            <table id="activeTable">
-                <thead><tr><th>File</th><th>Status</th><th>Progress</th></tr></thead>
-                <tbody></tbody>
-            </table>
+
+        <div class="box-container" style="flex: 1;">
+            <div class="box-title">Active Streams</div>
+            <div class="table-scroll">
+                <table id="activeTable">
+                    <thead><tr><th>Video</th><th>Peer</th><th>Progress</th><th>Status</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </div>
-        <div>Buffer: <progress id="globalBuffer" value="0" max="100" style="width:100%"></progress></div>
     </div>
 </div>
 
 <div class="bottom-log" id="logs"></div>
 
 <script>
-    let ws, selectedRowData = null;
-    let searchHashes = new Set();
-    let discoverHashes = new Set();
+    let ws;
+    let selectedFile = null;
+    let activeMeta = {};
+    let isVideoInitialized = false;
+
     const logs = document.getElementById('logs');
-
-    function log(msg) { logs.innerHTML += `<div>> ${msg}</div>`; logs.scrollTop = logs.scrollHeight; }
-
-    function showAbout() {
-        alert("CSE471 P2P Video Streaming Project\n\nVersion: 1.0\nProtocol: UDP (Search) + TCP (Transfer)\nArchitecture: Dockerized P2P Mesh");
-    }
+    function log(m) { logs.innerHTML += `<div>> ${m}</div>`; logs.scrollTop = logs.scrollHeight; }
+    function formatBytes(b) { if(!b) return '0 B'; const i=Math.floor(Math.log(b)/Math.log(1024)); return `${(b/Math.pow(1024,i)).toFixed(2)} ${['B','KB','MB','GB'][i]}`; }
 
     function connect() {
         log("Connecting...");
-        ws = new WebSocket(`ws://${window.location.host}/ws`);
+        ws = new WebSocket(`ws://${location.host}/ws`);
         ws.onopen = () => {
-            document.getElementById('statusText').innerText = "Connected";
-            document.getElementById('statusText').style.color = "#4ec9b0";
+            document.getElementById('statusBadge').innerText = "CONNECTED";
+            document.getElementById('statusBadge').style.color = "#4ec9b0";
             document.getElementById('searchInput').disabled = false;
             document.getElementById('searchBtn').disabled = false;
             fetch('/api/connect', {method: 'POST'});
+
+            // Tabloları temizle
+            document.querySelector('#searchTable tbody').innerHTML = "";
             document.querySelector('#discoverTable tbody').innerHTML = "";
-            discoverHashes.clear();
         };
-        ws.onmessage = (evt) => {
-            const data = JSON.parse(evt.data);
-            if(data.type === 'RESULT') handleResult(data);
-            else if(data.type === 'LOG') log(data.message);
-            else if(data.type === 'PROGRESS') updateProgress(data);
+        ws.onmessage = (e) => {
+            const d = JSON.parse(e.data);
+            if(d.type === 'RESULT') handleResult(d);
+            else if(d.type === 'LOG') log(d.message);
+            else if(d.type === 'PROGRESS') updateProgress(d);
+        };
+        ws.onclose = () => {
+            document.getElementById('statusBadge').innerText = "OFFLINE";
+            document.getElementById('statusBadge').style.color = "#666";
         };
     }
 
-    // --- GÜNCELLENEN KISIM: BACKEND ILE KONUŞAN DISCONNECT ---
-    function disconnect() {
-        if(ws) ws.close();
-
-        // 1. Sağ üstteki yazıyı güncelle
-        document.getElementById('statusText').innerText = "Disconnected";
-        document.getElementById('statusText').style.color = "#555";
-
-        // 2. Butonları devre dışı bırak
-        document.getElementById('searchInput').disabled = true;
-        document.getElementById('searchBtn').disabled = true;
-
-        // 3. Backend'e "Peer'ı Kapat/Durdur" emri gönder
-        fetch('/api/disconnect', {method: 'POST'})
-            .then(() => log("Backend disconnected."))
-            .catch(e => log("Error disconnecting backend"));
-    }
-    // ---------------------------------------------------------
+    function disconnect() { if(ws) ws.close(); fetch('/api/disconnect', {method:'POST'}); }
 
     function doSearch() {
-        const q = document.getElementById('searchInput').value;
         document.querySelector('#searchTable tbody').innerHTML = "";
-        searchHashes.clear();
+        const q = document.getElementById('searchInput').value;
         fetch(`/api/search?q=${q}`, {method: 'POST'});
     }
+
+    // --- AYRI TABLOLAR MANTIĞI ---
     function handleResult(file) {
-        let tableId, hashSet;
-        if (file.resultType === 'SEARCH_RESULT') { tableId = '#searchTable'; hashSet = searchHashes; }
-        else { tableId = '#discoverTable'; hashSet = discoverHashes; }
-        if (hashSet.has(file.hash)) return;
-        hashSet.add(file.hash);
+        let tableId;
+        // Backend'den gelen tipe göre tablo seç
+        if (file.resultType === 'SEARCH_RESULT') {
+            tableId = '#searchTable';
+        } else {
+            tableId = '#discoverTable'; // DISCOVER_RESULT
+        }
+
+        // Aynı dosya varsa ekleme
+        const existingRow = document.querySelector(`${tableId} tr[data-hash="${file.hash}"]`);
+        if (existingRow) return;
 
         const tbody = document.querySelector(tableId + ' tbody');
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${file.fileName}</td><td>${(file.size/1024).toFixed(1)} KB</td><td>${file.peerIp}</td>`;
+        tr.setAttribute('data-hash', file.hash);
+        tr.innerHTML = `<td>${file.fileName}</td><td>${formatBytes(file.size)}</td><td>${file.peerIp}</td>`;
+
         tr.onclick = () => {
             document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
             tr.classList.add('selected');
-            selectedRowData = file;
+            selectedFile = file;
             document.getElementById('dlBtn').disabled = false;
         };
         tbody.appendChild(tr);
     }
-    function downloadSelected() {
-        if(!selectedRowData) return;
-        fetch(`/api/download?ip=${selectedRowData.peerIp}&file=${selectedRowData.fileName}&hash=${selectedRowData.hash}&size=${selectedRowData.size}`, {method: 'POST'});
-        const tbody = document.querySelector('#activeTable tbody');
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${selectedRowData.fileName}</td><td id="stat-${selectedRowData.hash}">Start</td><td id="prog-${selectedRowData.hash}">0%</td>`;
-        tbody.appendChild(tr);
-    }
-    function updateProgress(data) {
-        const p = document.getElementById(`prog-${data.hash}`);
-        const s = document.getElementById(`stat-${data.hash}`);
-        if(p) p.innerText = data.percent + "%";
-        if(s) s.innerText = data.status;
-        document.getElementById('globalBuffer').value = data.percent;
 
-        if(data.percent >= 10 && selectedRowData && selectedRowData.hash === data.hash) {
-            const ext = selectedRowData.fileName.split('.').pop().toLowerCase();
-            const url = `/api/watch/${selectedRowData.fileName}`;
-            document.getElementById('mediaPlaceholder').style.display = 'none';
-            if(['mp4','webm'].includes(ext)) {
-                const v = document.getElementById('videoPlayer');
-                v.style.display = 'block';
-                if(!v.src.includes(url)) { v.src = url; v.play().catch(()=>{}); }
-            } else {
-                const i = document.getElementById('imageViewer');
-                i.style.display = 'block';
-                i.src = url;
-            }
+    function startDownload() {
+        if(!selectedFile) return;
+        activeMeta[selectedFile.hash] = selectedFile;
+        isVideoInitialized = false;
+
+        // Player UI Hazırla
+        document.getElementById('dlStatus').style.display = 'block';
+        document.getElementById('currentFileName').innerText = selectedFile.fileName;
+        document.getElementById('placeholder').style.display = 'block';
+        document.getElementById('videoPlayer').style.display = 'none';
+        document.getElementById('videoPlayer').src = "";
+        document.getElementById('placeholder').innerText = "Buffering... (" + selectedFile.fileName + ")";
+
+        // Active Streams Tablosuna Ekle
+        const tbody = document.querySelector('#activeTable tbody');
+        if(!document.getElementById(`row-${selectedFile.hash}`)) {
+            const tr = document.createElement('tr');
+            tr.id = `row-${selectedFile.hash}`;
+            tr.innerHTML = `
+                <td>${selectedFile.fileName}</td>
+                <td>${selectedFile.peerIp}</td>
+                <td id="prog-${selectedFile.hash}">0%</td>
+                <td id="stat-${selectedFile.hash}">Starting...</td>
+            `;
+            tbody.appendChild(tr);
+        }
+
+        fetch(`/api/download?ip=${selectedFile.peerIp}&file=${selectedFile.fileName}&hash=${selectedFile.hash}&size=${selectedFile.size}`, {method:'POST'});
+    }
+
+    // --- İLERLEME VE STREAMING MANTIĞI ---
+    function updateProgress(d) {
+        const file = activeMeta[d.hash];
+        if(!file) return;
+
+        // 1. Tabloyu Güncelle
+        const pCell = document.getElementById(`prog-${d.hash}`);
+        const sCell = document.getElementById(`stat-${d.hash}`);
+        if(pCell) pCell.innerText = d.percent + "%";
+        if(sCell) sCell.innerText = d.status;
+
+        // 2. Video Altındaki Barı Güncelle
+        document.getElementById('progBar').style.width = d.percent + "%";
+        document.getElementById('percentText').innerText = d.percent + "%";
+        document.getElementById('sizeText').innerText = `${formatBytes(d.current)} / ${formatBytes(d.total)}`;
+
+        // 3. Video Başlatma (%5 dolunca)
+        if(d.percent >= 5 && !isVideoInitialized) {
+            startStream(file.fileName);
+        }
+    }
+
+    function startStream(filename) {
+        isVideoInitialized = true;
+        const ext = filename.split('.').pop().toLowerCase();
+        const url = `/api/watch/${filename}`;
+
+        document.getElementById('placeholder').style.display = 'none';
+
+        if(['mp4', 'webm', 'mkv'].includes(ext)) {
+            const v = document.getElementById('videoPlayer');
+            v.style.display = 'block';
+            v.src = url;
+            v.play().catch(e => console.log("Autoplay blocked"));
+        } else if (['jpg', 'png'].includes(ext)) {
+            const i = document.getElementById('imageViewer');
+            i.style.display = 'block';
+            i.src = url;
         }
     }
 </script>

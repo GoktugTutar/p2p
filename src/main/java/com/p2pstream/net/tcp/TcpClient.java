@@ -13,7 +13,7 @@ public class TcpClient implements Runnable {
     private final String targetIp;
     private final String fileName;
     private final String fileHash;
-    private final long totalSize; // İlerleme çubuğu için gerekli
+    private final long totalSize;
 
     public TcpClient(String targetIp, String fileName, String fileHash, long totalSize) {
         this.targetIp = targetIp;
@@ -28,7 +28,9 @@ public class TcpClient implements Runnable {
         File finalFile = new File(Constants.SHARED_FOLDER + "/" + fileName);
 
         System.out.println("⬇️ TCP İndirme Başlıyor: " + fileName + " Kaynak: " + targetIp);
-        HeadlessPeer.broadcastProgress(fileHash, 0, "Connecting...");
+
+        // DÜZELTME 1: Parametre sayısı güncellendi (0, totalSize)
+        HeadlessPeer.broadcastProgress(fileHash, 0, totalSize, "Connecting...");
 
         try (Socket socket = new Socket(targetIp, Constants.TCP_PORT);
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
@@ -47,31 +49,32 @@ public class TcpClient implements Runnable {
                 fos.write(buffer, 0, bytesRead);
                 totalRead += bytesRead;
 
-                // İlerleme Hesapla
-                int percent = (int) ((totalRead * 100) / totalSize);
-
-                // Arayüze Bildir (Çok sık bildirmemek için mod kontrolü yapılabilir ama şimdilik her chunkta yapalım)
-                if (totalRead % (Constants.CHUNK_SIZE * 10) == 0 || percent == 100) {
-                    // %20 olduysa "Playing", yoksa "Buffering"
-                    String status = (percent >= 20) ? "Playing" : "Buffering...";
-                    HeadlessPeer.broadcastProgress(fileHash, percent, status);
+                // DÜZELTME 2: İlerleme bildirimi yeni format (totalRead, totalSize)
+                if (totalRead % (Constants.CHUNK_SIZE * 10) == 0 || totalRead == totalSize) {
+                    int percent = (int) ((totalRead * 100) / totalSize);
+                    String status = (percent >= 10) ? "Playing" : "Buffering...";
+                    HeadlessPeer.broadcastProgress(fileHash, totalRead, totalSize, status);
                 }
             }
 
             System.out.println("✅ İndirme bitti. Dosya taşınıyor...");
-            HeadlessPeer.broadcastProgress(fileHash, 100, "Finalizing...");
+            // DÜZELTME 3: Finalizing durumu
+            HeadlessPeer.broadcastProgress(fileHash, totalSize, totalSize, "Finalizing...");
 
             // 3. İndirme bitince dosyayı BUFFER -> SHARED klasörüne taşı
             Files.move(bufferFile.toPath(), finalFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
 
             System.out.println("✅ Dosya başarıyla kaydedildi: " + finalFile.getAbsolutePath());
             HeadlessPeer.broadcastLog("Download Completed: " + fileName);
-            HeadlessPeer.broadcastProgress(fileHash, 100, "Completed");
+
+            // DÜZELTME 4: Tamamlandı durumu
+            HeadlessPeer.broadcastProgress(fileHash, totalSize, totalSize, "Completed");
 
         } catch (IOException e) {
             System.err.println("TCP İndirme Hatası: " + e.getMessage());
             HeadlessPeer.broadcastLog("Download Failed: " + e.getMessage());
-            HeadlessPeer.broadcastProgress(fileHash, 0, "Error");
+            // DÜZELTME 5: Hata durumu
+            HeadlessPeer.broadcastProgress(fileHash, 0, totalSize, "Error");
         }
     }
 }

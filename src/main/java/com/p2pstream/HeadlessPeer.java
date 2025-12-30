@@ -11,6 +11,7 @@ import io.javalin.Javalin;
 import io.javalin.http.staticfiles.Location;
 import io.javalin.websocket.WsContext;
 
+import java.io.File;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -25,7 +26,6 @@ public class HeadlessPeer {
     public static final Set<WsContext> webClients = ConcurrentHashMap.newKeySet();
     public static final ConcurrentHashMap<String, Set<String>> searchResultsCache = new ConcurrentHashMap<>();
 
-    // 1. EKSİK OLAN KISIM BURASIYDI: Değişkeni sınıf seviyesinde tanımlıyoruz
     private static UdpServer udpServer;
 
     public static void main(String[] args) {
@@ -34,6 +34,10 @@ public class HeadlessPeer {
             System.setProperty("org.slf4j.simpleLogger.log.org.eclipse.jetty", "off");
 
             System.out.println(">>> P2P CLIENT SYSTEM STARTED...");
+
+            // Klasörleri garantiye al
+            new File(Constants.BUFFER_FOLDER).mkdirs();
+            new File(Constants.SHARED_FOLDER).mkdirs();
 
             FileService fileService = new FileService("shared_videos");
             fileService.scanFiles();
@@ -46,8 +50,6 @@ public class HeadlessPeer {
             UdpSender udpSender = new UdpSender();
             MyUdpHandler udpHandler = new MyUdpHandler(udpSender, fileService, peerId, myIp, myPort);
 
-            // 2. DEĞİŞİKLİK BURADA: Artık 'new Thread' içine gizlemiyoruz.
-            // Değişkene atayıp başlatıyoruz. (UdpServer.start() zaten kendi thread'ini açıyor)
             udpServer = new UdpServer(Constants.UDP_PORT, udpHandler);
             udpServer.start();
 
@@ -61,50 +63,30 @@ public class HeadlessPeer {
                         config.showJavalinBanner = false;
                     }).start(8080);
 
-                    // 1. CONNECT API
+                    // API ENDPOINTS
                     app.post("/api/connect", ctx -> {
-                        broadcastLog("Connecting... Sending HELLO to local subnet.");
-
-                        // Server durmuşsa tekrar başlat
-                        if (!udpServer.isRunning()) {
-                            udpServer.start();
-                            broadcastLog("UDP Server restarted.");
-                        }
-
+                        if (!udpServer.isRunning()) { udpServer.start(); broadcastLog("UDP Server restarted."); }
                         int ttl = Constants.ttl;
                         Packet p = Packet.simpleText(MessageType.HELLO, myIp, myPort, ttl, "Hi");
                         udpSender.sendToAllLocalSubnets(PacketCodec.encode(p), Constants.UDP_PORT);
                         ctx.result("HELLO Broadcast Sent");
                     });
 
-                    // 3. EKSİK OLAN DISCONNECT API'Sİ
                     app.post("/api/disconnect", ctx -> {
-                        broadcastLog("Disconnecting from network...");
-
-                        // Artık 'udpServer' değişkenine erişebiliyoruz!
-                        if (udpServer != null && udpServer.isRunning()) {
-                            udpServer.stop();
-                            System.out.println("⛔ UDP Server durduruldu (Disconnect isteği).");
-                        }
+                        if (udpServer != null && udpServer.isRunning()) { udpServer.stop(); }
+                        broadcastLog("Disconnected from network.");
                         ctx.result("Disconnected");
                     });
 
-                    // 2. SEARCH API
                     app.post("/api/search", ctx -> {
-                        if (!udpServer.isRunning()) {
-                            ctx.status(400).result("Offline. Please connect first.");
-                            return;
-                        }
+                        if (!udpServer.isRunning()) { ctx.status(400).result("Offline"); return; }
                         String query = ctx.queryParam("q");
                         searchResultsCache.clear();
-                        broadcastLog("Searching network for: '" + query + "'");
-
                         Packet p = Packet.simpleText(MessageType.SEARCH, myIp, myPort, Constants.ttl, query);
                         udpSender.sendToAllLocalSubnets(PacketCodec.encode(p), Constants.UDP_PORT);
                         ctx.result("OK");
                     });
 
-                    // 3. DOWNLOAD API
                     app.post("/api/download", ctx -> {
                         String fileName = ctx.queryParam("file");
                         String fileHash = ctx.queryParam("hash");
@@ -115,29 +97,25 @@ public class HeadlessPeer {
                         if (fallbackIp != null) owners.add(fallbackIp);
                         owners.remove(myIp);
 
-                        if (owners.isEmpty()) {
-                            ctx.status(400).result("No peers found.");
-                            return;
-                        }
+                        if (owners.isEmpty()) { ctx.status(400).result("No peers found."); return; }
 
                         List<String> sourceIps = new ArrayList<>(owners);
                         ParallelDownloader downloader = new ParallelDownloader(fileName, fileHash, size, sourceIps);
                         new Thread(downloader).start();
-
                         ctx.result("Download Started");
                     });
 
-                    // 4. STREAM API
                     app.get("/api/watch/{filename}", ctx -> {
-                        java.io.File buffer = new java.io.File(Constants.BUFFER_FOLDER + "/" + ctx.pathParam("filename"));
-                        java.io.File shared = new java.io.File(Constants.SHARED_FOLDER + "/" + ctx.pathParam("filename"));
-                        java.io.File target = buffer.exists() ? buffer : shared;
+                        File buffer = new File(Constants.BUFFER_FOLDER + "/" + ctx.pathParam("filename"));
+                        File shared = new File(Constants.SHARED_FOLDER + "/" + ctx.pathParam("filename"));
+                        File target = buffer.exists() ? buffer : shared;
+
                         if (target.exists()) {
                             String fName = ctx.pathParam("filename");
-                            String mime = fName.endsWith(".mp4") ? "video/mp4" : (fName.endsWith(".png") ? "image/png" : "application/octet-stream");
+                            String mime = fName.endsWith(".mp4") ? "video/mp4" : "application/octet-stream";
                             ctx.contentType(mime);
                             ctx.writeSeekableStream(new java.io.FileInputStream(target), mime);
-                        } else { ctx.status(404).result("Wait for chunks..."); }
+                        } else { ctx.status(404).result("File not found"); }
                     });
 
                     app.ws("/ws", ws -> {
@@ -155,10 +133,7 @@ public class HeadlessPeer {
 
     public static void broadcastToWeb(String resultType, String fileName, long size, String hash, String peerIp) {
         searchResultsCache.computeIfAbsent(hash, k -> ConcurrentHashMap.newKeySet()).add(peerIp);
-        sendJson(String.format(
-                "{\"type\":\"RESULT\", \"resultType\":\"%s\", \"fileName\":\"%s\", \"size\":%d, \"hash\":\"%s\", \"peerIp\":\"%s\"}",
-                resultType, fileName, size, hash, peerIp
-        ));
+        sendJson(String.format("{\"type\":\"RESULT\", \"resultType\":\"%s\", \"fileName\":\"%s\", \"size\":%d, \"hash\":\"%s\", \"peerIp\":\"%s\"}", resultType, fileName, size, hash, peerIp));
     }
 
     private static String getRealIp() {
@@ -170,9 +145,7 @@ public class HeadlessPeer {
                 Enumeration<InetAddress> addresses = iface.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     InetAddress addr = addresses.nextElement();
-                    if (addr instanceof Inet4Address && addr.getHostAddress().startsWith("172.")) {
-                        return addr.getHostAddress();
-                    }
+                    if (addr instanceof Inet4Address && addr.getHostAddress().startsWith("172.")) return addr.getHostAddress();
                 }
             }
             return InetAddress.getLocalHost().getHostAddress();
@@ -183,8 +156,10 @@ public class HeadlessPeer {
         sendJson(String.format("{\"type\":\"LOG\", \"message\":\"%s\"}", message));
     }
 
-    public static void broadcastProgress(String hash, int percent, String status) {
-        sendJson(String.format("{\"type\":\"PROGRESS\", \"hash\":\"%s\", \"percent\":%d, \"status\":\"%s\"}", hash, percent, status));
+    // GÜNCELLENEN METOD: Artık byte miktarlarını da gönderiyor
+    public static void broadcastProgress(String hash, long current, long total, String status) {
+        int percent = (total > 0) ? (int)((current * 100) / total) : 0;
+        sendJson(String.format("{\"type\":\"PROGRESS\", \"hash\":\"%s\", \"current\":%d, \"total\":%d, \"percent\":%d, \"status\":\"%s\"}", hash, current, total, percent, status));
     }
 
     private static void sendJson(String json) {
