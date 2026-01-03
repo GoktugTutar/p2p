@@ -7,11 +7,9 @@ import java.io.*;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.security.MessageDigest;
+import java.util.*;
+import java.util.concurrent.*;
 
 public class ParallelDownloader implements Runnable {
 
@@ -21,175 +19,201 @@ public class ParallelDownloader implements Runnable {
     private final List<String> peerIps;
     private final int totalChunks;
 
-    // İndirilen parçaların kaydı (Global Liste)
     private final ConcurrentHashMap<Integer, Boolean> downloadedChunks = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedQueue<Integer> failedChunks = new ConcurrentLinkedQueue<>();
 
     public ParallelDownloader(String fileName, String fileHash, long totalSize, List<String> peerIps) {
         this.fileName = fileName;
         this.fileHash = fileHash;
         this.totalSize = totalSize;
         this.peerIps = peerIps;
-        // Toplam chunk sayısını hesapla
         this.totalChunks = (int) Math.ceil((double) totalSize / Constants.CHUNK_SIZE);
     }
 
     @Override
     public void run() {
-        System.out.println("⬇️  STATİK BÖLÜMLENDİRME İLE İNDİRME BAŞLATILDI: " + fileName);
-        System.out.println("    └─ Dosya Boyutu: " + (totalSize / 1024) + " KB");
-        System.out.println("    └─ Toplam Parça (Chunk): " + totalChunks);
-        System.out.println("    └─ Kaynak Peer Sayısı: " + peerIps.size());
+        System.out.println("⬇️  İNDİRME BAŞLATILDI: " + fileName);
 
-        // 1. Dosya ve Klasör Hazırlığı
+        // --- 1. İSTEK: DETAYLI BAŞLANGIÇ LOGLARI ---
+        HeadlessPeer.broadcastLog("------------------------------------------------");
+        HeadlessPeer.broadcastLog("🎬 STARTING DOWNLOAD: " + fileName);
+        HeadlessPeer.broadcastLog("📦 Total Size: " + (totalSize / 1024) + " KB");
+        HeadlessPeer.broadcastLog("🧩 Total Chunks: " + totalChunks);
+        HeadlessPeer.broadcastLog("👥 Active Peers: " + peerIps.size() + " (" + peerIps + ")");
+        HeadlessPeer.broadcastLog("------------------------------------------------");
+
         File bufferFile = new File(Constants.BUFFER_FOLDER + "/" + fileName);
-        if (bufferFile.getParentFile() != null && !bufferFile.getParentFile().exists()) {
-            bufferFile.getParentFile().mkdirs();
-        }
+        if (bufferFile.getParentFile() != null) bufferFile.getParentFile().mkdirs();
 
         try (RandomAccessFile raf = new RandomAccessFile(bufferFile, "rw")) {
-            // YouTube tarzı izleme için dosyayı baştan tam boyuta getir (Pre-allocation)
-            raf.setLength(totalSize);
-        } catch (IOException e) {
-            e.printStackTrace();
-            return;
-        }
+            if (raf.length() != totalSize) raf.setLength(totalSize);
+        } catch (IOException e) { e.printStackTrace(); return; }
 
-        // 2. Görev Dağılımı (Partitioning Logic)
         int numPeers = peerIps.size();
-        if (numPeers == 0) return;
+        ExecutorService executor = Executors.newFixedThreadPool(Math.max(1, numPeers));
 
-        // Her peer'a kaç parça düşecek?
         int chunksPerPeer = totalChunks / numPeers;
-        int remainder = totalChunks % numPeers; // Kalan parçalar (Eşit bölünmezse)
-
-        // Peer sayısı kadar Thread açıyoruz
-        ExecutorService executor = Executors.newFixedThreadPool(numPeers);
-
+        int remainder = totalChunks % numPeers;
         int startChunkIndex = 0;
 
         for (String peerIp : peerIps) {
-            // Bu peer kaç parça alacak? (Kalan varsa sırayla 1'er tane ekle)
             int assignedCount = chunksPerPeer + (remainder > 0 ? 1 : 0);
             if (remainder > 0) remainder--;
-
-            if (assignedCount == 0) continue; // Peer sayısı chunk sayısından fazlaysa bazıları boş kalabilir
+            if (assignedCount == 0) continue;
 
             int endChunkIndex = startChunkIndex + assignedCount;
 
-            // Log: Kim nereyi alıyor?
-            System.out.println("    👉 Görev Ataması: " + peerIp + " -> Chunk [" + startChunkIndex + " - " + (endChunkIndex - 1) + "]");
+            // --- LOG: KİM HANGİ PARÇAYI ALIYOR? ---
+            String assignmentLog = String.format("👉 TASK ASSIGNED: Peer [%s] gets Chunks [%d - %d]", peerIp, startChunkIndex, (endChunkIndex - 1));
+            System.out.println(assignmentLog);
+            HeadlessPeer.broadcastLog(assignmentLog);
 
-            // Thread'i başlat (final değişkenler lambda için gereklidir)
             final int myStart = startChunkIndex;
             final int myEnd = endChunkIndex;
 
-            executor.submit(() -> downloadRangeFromPeer(peerIp, myStart, myEnd, bufferFile));
-
-            // Bir sonraki peer için başlangıç noktasını kaydır
+            executor.submit(() -> downloadRangePersistent(peerIp, myStart, myEnd, bufferFile));
             startChunkIndex = endChunkIndex;
         }
 
-        // 3. Bitmesini Bekle
         executor.shutdown();
-        try {
-            // 15 dakika veya işlem bitene kadar bekle
-            executor.awaitTermination(15, TimeUnit.MINUTES);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
+        try { executor.awaitTermination(60, TimeUnit.MINUTES); } catch (InterruptedException e) {}
+
+        if (!failedChunks.isEmpty()) {
+            HeadlessPeer.broadcastLog("⚠️ Retrying " + failedChunks.size() + " failed chunks...");
+            processRetryQueue(bufferFile);
         }
 
-        // 4. Sonuç Kontrolü
         if (downloadedChunks.size() == totalChunks) {
-            System.out.println("✅  TÜM PARÇALAR TAMAMLANDI: " + fileName);
-            try {
-                File finalFile = new File(Constants.SHARED_FOLDER + "/" + fileName);
-                if (finalFile.getParentFile() != null) finalFile.getParentFile().mkdirs();
-                Files.move(bufferFile.toPath(), finalFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-
-                HeadlessPeer.broadcastProgress(fileHash, totalSize, totalSize, "Completed");
-                HeadlessPeer.broadcastLog("Download Finished: " + fileName);
-            } catch (IOException e) { e.printStackTrace(); }
+            if (verifyFileHash(bufferFile)) {
+                try {
+                    File finalFile = new File(Constants.SHARED_FOLDER + "/" + fileName);
+                    Files.move(bufferFile.toPath(), finalFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    HeadlessPeer.broadcastProgress(fileHash, totalSize, totalSize, "Completed");
+                    HeadlessPeer.broadcastLog("✅ DONE: " + fileName + " is ready!");
+                    HeadlessPeer.downloadedChunksCache.remove(fileName);
+                } catch (IOException e) { e.printStackTrace(); }
+            } else {
+                HeadlessPeer.broadcastLog("❌ HASH MISMATCH: File corrupted.");
+            }
         } else {
-            System.err.println("❌  İndirme Eksik Kaldı: " + downloadedChunks.size() + "/" + totalChunks + " parça indi.");
-            HeadlessPeer.broadcastProgress(fileHash, downloadedChunks.size() * Constants.CHUNK_SIZE, totalSize, "Error/Incomplete");
+            HeadlessPeer.broadcastProgress(fileHash, downloadedChunks.size() * Constants.CHUNK_SIZE, totalSize, "Incomplete");
         }
     }
 
-    /**
-     * Bu metod, spesifik bir Peer'dan, belirli bir ARALIKTAKİ (Range) chunkları ister.
-     */
-// ParallelDownloader.java içindeki metodun güncel hali:
-
-    private void downloadRangeFromPeer(String ip, int startIndex, int endIndex, File bufferFile) {
-        System.out.println("THREAD BAŞLADI [" + ip + "]: Chunk " + startIndex + "'den " + endIndex + "'e kadar istiyor.");
-
+    private void downloadRangePersistent(String ip, int startIndex, int endIndex, File bufferFile) {
         try (Socket socket = new Socket(ip, Constants.TCP_PORT);
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              InputStream in = socket.getInputStream()) {
 
-            // Tek bir soket bağlantısı üzerinden seri istek atmak yerine,
-            // her chunk için ayrı bağlantı açmak daha güvenlidir (Stateless).
-            // Mevcut yapınızda "Keep-Alive" yoksa döngü içinde soket açmak gerekebilir.
-            // Ancak performans için soketi dışarıda tutuyoruz.
+            for (int i = startIndex; i < endIndex; i++) {
+                if (downloadedChunks.containsKey(i)) continue;
 
-            // DİKKAT: Mevcut TcpServer kodunuz "Bir istek al, cevapla, kapat" mantığında çalışıyor olabilir.
-            // Eğer TcpServer "while" döngüsü ile sürekli dinlemiyorsa, soket her chunk'ta kapanır.
-            // Bu yüzden döngüyü BURADA DEĞİL, dışarıda yapıp her chunk için yeniden bağlanmalıyız.
-        } catch (IOException e) {
-            // ...
+                try {
+                    out.println(fileName + ":" + i);
+
+                    byte[] chunkBuffer = new byte[Constants.CHUNK_SIZE];
+                    int totalBytesRead = 0;
+                    int read;
+
+                    while (totalBytesRead < Constants.CHUNK_SIZE) {
+                        int toRead = Constants.CHUNK_SIZE - totalBytesRead;
+                        read = in.read(chunkBuffer, totalBytesRead, toRead);
+                        if (read == -1) break;
+                        totalBytesRead += read;
+                        if ((long) i * Constants.CHUNK_SIZE + totalBytesRead >= totalSize) break;
+                    }
+
+                    if (totalBytesRead > 0) {
+                        synchronized (bufferFile) {
+                            try (RandomAccessFile raf = new RandomAccessFile(bufferFile, "rw")) {
+                                raf.seek((long) i * Constants.CHUNK_SIZE);
+                                raf.write(chunkBuffer, 0, totalBytesRead);
+                            }
+                        }
+                        downloadedChunks.put(i, true);
+
+                        Set<Integer> globalSet = HeadlessPeer.downloadedChunksCache.get(fileName);
+                        if (globalSet != null) globalSet.add(i);
+
+                        reportProgress();
+
+                        // --- 2. İSTEK: YAPAY YAVAŞLATMA (THROTTLING) ---
+                        // Her chunk indiğinde 300ms bekle.
+                        // Böylece 100 chunk'lık bir dosya yaklaşık 30 saniyede iner.
+                        try { Thread.sleep(300); } catch (InterruptedException e) {}
+
+                    } else {
+                        failedChunks.add(i);
+                    }
+                } catch (Exception ex) {
+                    failedChunks.add(i);
+                    throw ex;
+                }
+            }
+        } catch (Exception e) {
+            for (int i = startIndex; i < endIndex; i++) {
+                if (!downloadedChunks.containsKey(i) && !failedChunks.contains(i)) {
+                    failedChunks.add(i);
+                }
+            }
         }
+    }
 
-        // --- DÜZELTME: Her Chunk İçin Yeni Bağlantı ---
-        // TcpServer kodunuz "request = in.readLine()" sonrası cevabı verip finally bloğunda socket.close() yapıyor.
-        // Bu yüzden tek soketle birden fazla chunk isteyemezsiniz.
+    private void processRetryQueue(File bufferFile) {
+        Random rand = new Random();
+        while (!failedChunks.isEmpty()) {
+            Integer chunkId = failedChunks.poll();
+            if (chunkId == null) break;
 
-        for (int i = startIndex; i < endIndex; i++) {
-            if (downloadedChunks.containsKey(i)) continue;
+            String backupIp = peerIps.get(rand.nextInt(peerIps.size()));
 
-            try (Socket socket = new Socket(ip, Constants.TCP_PORT);
+            try (Socket socket = new Socket(backupIp, Constants.TCP_PORT);
                  PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
                  InputStream in = socket.getInputStream()) {
 
-                out.println(fileName + ":" + i);
+                out.println(fileName + ":" + chunkId);
+                byte[] data = new byte[Constants.CHUNK_SIZE];
+                // Basit okuma (Retry için detaylı döngüye gerek duymadık şimdilik)
+                int read = in.read(data);
 
-                // Veriyi oku
-                byte[] chunkBuffer = new byte[Constants.CHUNK_SIZE];
-                int totalBytesRead = 0;
-                int read;
-
-                // Tampon dolana veya veri bitene kadar oku
-                while ((read = in.read(chunkBuffer, totalBytesRead, Constants.CHUNK_SIZE - totalBytesRead)) != -1) {
-                    totalBytesRead += read;
-                    // Eğer buffer dolduysa çık (Gereksiz beklemeyi önle)
-                    if (totalBytesRead == Constants.CHUNK_SIZE) break;
-                }
-
-                if (totalBytesRead > 0) {
+                if (read > 0) {
                     synchronized (bufferFile) {
                         try (RandomAccessFile raf = new RandomAccessFile(bufferFile, "rw")) {
-                            raf.seek((long) i * Constants.CHUNK_SIZE);
-                            raf.write(chunkBuffer, 0, totalBytesRead);
+                            raf.seek((long) chunkId * Constants.CHUNK_SIZE);
+                            raf.write(data, 0, read);
                         }
                     }
-                    downloadedChunks.put(i, true);
+                    downloadedChunks.put(chunkId, true);
+                    Set<Integer> globalSet = HeadlessPeer.downloadedChunksCache.get(fileName);
+                    if (globalSet != null) globalSet.add(chunkId);
                     reportProgress();
-                } else {
-                    System.err.println("⚠️  Boş veri geldi (veya bağlantı kapandı): " + ip + " Chunk: " + i);
+
+                    // Retry yaparken de yavaşlatalım ki görebilesiniz
+                    try { Thread.sleep(500); } catch (InterruptedException e) {}
                 }
-
-            } catch (IOException e) {
-                System.err.println("❌  Bağlantı Hatası (" + ip + "): " + e.getMessage());
-            }
+            } catch (Exception e) {}
         }
+    }
 
-        System.out.println("THREAD BİTTİ [" + ip + "]");
+    private boolean verifyFileHash(File file) {
+        try (InputStream fis = new FileInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] block = new byte[4096];
+            int length;
+            while ((length = fis.read(block)) > 0) digest.update(block, 0, length);
+
+            StringBuilder sb = new StringBuilder();
+            for (byte b : digest.digest()) sb.append(String.format("%02x", b));
+
+            if (fileHash == null || fileHash.isEmpty()) return true;
+            return sb.toString().equalsIgnoreCase(fileHash);
+        } catch (Exception e) { return false; }
     }
 
     private void reportProgress() {
         long currentBytes = (long) downloadedChunks.size() * Constants.CHUNK_SIZE;
         if (currentBytes > totalSize) currentBytes = totalSize;
-
-        String status = (currentBytes > totalSize * 0.1) ? "Playing" : "Buffering...";
+        String status = (currentBytes > totalSize * 0.05) ? "Playing/Downloading" : "Buffering...";
         HeadlessPeer.broadcastProgress(fileHash, currentBytes, totalSize, status);
     }
 }

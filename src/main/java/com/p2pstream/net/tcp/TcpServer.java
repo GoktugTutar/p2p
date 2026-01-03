@@ -9,58 +9,49 @@ public class TcpServer extends Thread {
     @Override
     public void run() {
         try (ServerSocket serverSocket = new ServerSocket(Constants.TCP_PORT)) {
-            System.out.println("🚀 Chunk File Server Başlatıldı: Port " + Constants.TCP_PORT);
+            System.out.println("🚀 Chunk File Server Başlatıldı (Persistent): Port " + Constants.TCP_PORT);
             while (true) {
                 Socket client = serverSocket.accept();
-                new Thread(() -> handleChunkRequest(client)).start();
+                // Her bağlantıyı ayrı bir thread'de "Sürekli Dinle" modunda çalıştır
+                new Thread(() -> handlePersistentConnection(client)).start();
             }
         } catch (IOException e) { e.printStackTrace(); }
     }
 
-    private void handleChunkRequest(Socket socket) {
+    private void handlePersistentConnection(Socket socket) {
         try (
                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                 OutputStream out = socket.getOutputStream()
         ) {
-            String request = in.readLine();
-            if (request == null) return;
+            String request;
+            // DÜZELTME: while döngüsü ile bağlantı kopana kadar istekleri dinle (Keep-Alive)
+            while ((request = in.readLine()) != null) {
+                String[] parts = request.split(":");
+                if (parts.length < 2) continue;
 
-            String[] parts = request.split(":");
-            String fileName = parts[0];
-            int chunkIndex = Integer.parseInt(parts[1]);
+                String fileName = parts[0];
+                int chunkIndex = Integer.parseInt(parts[1]);
 
-            File file = new File(Constants.SHARED_FOLDER + "/" + fileName);
-            if (!file.exists()) {
-                System.err.println("❌ Dosya bulunamadı: " + fileName);
-                return;
-            }
+                File file = new File(Constants.SHARED_FOLDER + "/" + fileName);
+                if (!file.exists()) continue; // Dosya yoksa sessizce geç veya hata kodu dön
 
-            try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
-                long offset = (long) chunkIndex * Constants.CHUNK_SIZE;
+                try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
+                    long offset = (long) chunkIndex * Constants.CHUNK_SIZE;
+                    if (offset >= file.length()) continue;
 
-                // Eğer istenen parça dosya boyutunu aşıyorsa, boş dön
-                if (offset >= file.length()) return;
+                    raf.seek(offset);
+                    byte[] buffer = new byte[Constants.CHUNK_SIZE];
+                    int bytesRead = raf.read(buffer);
 
-                raf.seek(offset);
-                byte[] buffer = new byte[Constants.CHUNK_SIZE];
-
-                // DÜZELTME BURADA:
-                // Son chunk, standart boyuttan küçük olabilir.
-                // Ne kadar okunabiliyorsa o kadar oku.
-                int bytesRead = raf.read(buffer);
-
-                if (bytesRead > 0) {
-                    // Yapay gecikme (İsteğe bağlı, test için)
-                    try { Thread.sleep(3500); } catch (InterruptedException e) {}
-
-                    // Okunan kadarını gönder (buffer'ın tamamını değil)
-                    out.write(buffer, 0, bytesRead);
-                    out.flush();
-                    // System.out.println("📤 Chunk " + chunkIndex + " gönderildi (" + bytesRead + " bytes)");
+                    if (bytesRead > 0) {
+                        out.write(buffer, 0, bytesRead);
+                        out.flush(); // Tamponu boşalt, veriyi yolla
+                    }
                 }
             }
         } catch (Exception e) {
-            // e.printStackTrace();
+            // Bağlantı koptuğunda buraya düşer, normaldir.
+            // System.out.println("Bağlantı sonlandı: " + socket.getInetAddress());
         } finally {
             try { socket.close(); } catch (IOException e) {}
         }

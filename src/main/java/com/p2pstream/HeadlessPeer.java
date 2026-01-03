@@ -26,6 +26,8 @@ public class HeadlessPeer {
     public static final Set<WsContext> webClients = ConcurrentHashMap.newKeySet();
     public static final ConcurrentHashMap<String, Set<String>> searchResultsCache = new ConcurrentHashMap<>();
 
+    public static final ConcurrentHashMap<String, Set<Integer>> downloadedChunksCache = new ConcurrentHashMap<>();
+
     private static UdpServer udpServer;
 
     public static void main(String[] args) {
@@ -102,95 +104,94 @@ public class HeadlessPeer {
 
                         if (owners.isEmpty()) { ctx.status(400).result("No peers found."); return; }
 
+                        // Cache'i temizle/hazırla
+                        downloadedChunksCache.put(fileName, ConcurrentHashMap.newKeySet());
+
                         List<String> sourceIps = new ArrayList<>(owners);
                         ParallelDownloader downloader = new ParallelDownloader(fileName, fileHash, size, sourceIps);
                         new Thread(downloader).start();
                         ctx.result("Download Started");
                     });
 
-                    // 5. STREAM API (MANUEL RANGE DESTEĞİ)
-                    // Tarayıcının parça parça (chunk geldikçe) videoyu istemesini sağlar.
+                    // 5. STREAM API
                     app.get("/api/watch/{filename}", ctx -> {
                         String fileName = ctx.pathParam("filename");
                         File bufferFile = new File(Constants.BUFFER_FOLDER + "/" + fileName);
                         File sharedFile = new File(Constants.SHARED_FOLDER + "/" + fileName);
-                        // Eğer buffer'da varsa oradan oku (indirme devam ediyordur), yoksa shared'dan oku
-                        File targetFile = bufferFile.exists() ? bufferFile : sharedFile;
 
-                        if (!targetFile.exists()) {
-                            ctx.status(404).result("File not found");
+                        // Eğer shared klasöründeyse (indirme bitmiş), direkt oradan sun
+                        if (sharedFile.exists()) {
+                            serveFileStandard(ctx, sharedFile);
                             return;
                         }
 
-                        long fileLength = targetFile.length();
-                        String contentType = fileName.endsWith(".mp4") ? "video/mp4" : "application/octet-stream";
+                        // Buffer'da yoksa 404
+                        if (!bufferFile.exists()) { ctx.status(404).result("File not found"); return; }
 
-                        // Tarayıcıdan gelen "Range" başlığını al (Örn: "bytes=0-" veya "bytes=1024-2048")
-                        String rangeHeader = ctx.header("Range");
+                        long fileLen = bufferFile.length();
+                        String range = ctx.header("Range");
+                        ctx.contentType("video/mp4");
+                        ctx.header("Accept-Ranges", "bytes");
 
-                        ctx.contentType(contentType);
-                        ctx.header("Accept-Ranges", "bytes"); // Tarayıcıya "Ben parça parça verebilirim" de.
-
-                        // Eğer Range başlığı yoksa tüm dosyayı gönder (200 OK)
-                        if (rangeHeader == null) {
+                        if (range == null) {
                             ctx.status(200);
-                            ctx.header("Content-Length", String.valueOf(fileLength));
-                            ctx.result(new FileInputStream(targetFile));
-                            return;
-                        }
+                            ctx.result(new FileInputStream(bufferFile));
+                        } else {
+                            String[] parts = range.replace("bytes=", "").split("-");
+                            long start = Long.parseLong(parts[0]);
+                            long end = parts.length > 1 ? Long.parseLong(parts[1]) : fileLen - 1;
+                            if (end >= fileLen) end = fileLen - 1;
+                            long len = end - start + 1;
 
-                        // Range varsa işle (206 Partial Content)
-                        try {
-                            String[] ranges = rangeHeader.replace("bytes=", "").split("-");
-                            long start = Long.parseLong(ranges[0]);
-                            // Bitiş belirtilmemişse dosyanın sonuna kadar al
-                            long end = ranges.length > 1 ? Long.parseLong(ranges[1]) : fileLength - 1;
-
-                            if (start > end || start >= fileLength) {
-                                ctx.status(416).header("Content-Range", "bytes */" + fileLength);
-                                return;
-                            }
-
-                            if (end >= fileLength) end = fileLength - 1;
-                            long contentLength = end - start + 1;
-
-                            // HTTP 206: Kısmi İçerik
                             ctx.status(206);
-                            ctx.header("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
-                            ctx.header("Content-Length", String.valueOf(contentLength));
+                            ctx.header("Content-Range", "bytes " + start + "-" + end + "/" + fileLen);
+                            ctx.header("Content-Length", String.valueOf(len));
 
-                            // RandomAccessFile ile dosyanın tam istenen yerine (seek) git ve oku
-                            RandomAccessFile raf = new RandomAccessFile(targetFile, "r");
+                            RandomAccessFile raf = new RandomAccessFile(bufferFile, "r");
                             raf.seek(start);
 
-                            // Javalin'e veriyi InputStream olarak ver
                             InputStream is = new InputStream() {
-                                long bytesLeft = contentLength;
+                                long bytesLeft = len;
+                                long currentPos = start;
+
                                 @Override
                                 public int read() throws IOException {
-                                    if (bytesLeft <= 0) return -1;
+                                    waitForData(currentPos);
                                     int b = raf.read();
-                                    bytesLeft--;
+                                    if (b != -1) {
+                                        bytesLeft--;
+                                        currentPos++;
+                                    }
                                     return b;
                                 }
+
                                 @Override
-                                public int read(byte[] b, int off, int len) throws IOException {
-                                    if (bytesLeft <= 0) return -1;
-                                    int read = raf.read(b, off, (int) Math.min(len, bytesLeft));
-                                    if (read != -1) bytesLeft -= read;
+                                public int read(byte[] b, int off, int l) throws IOException {
+                                    waitForData(currentPos);
+                                    int read = raf.read(b, off, (int) Math.min(l, bytesLeft));
+                                    if (read != -1) {
+                                        bytesLeft -= read;
+                                        currentPos += read;
+                                    }
                                     return read;
                                 }
+
                                 @Override
-                                public void close() throws IOException {
-                                    raf.close();
+                                public void close() throws IOException { raf.close(); }
+
+                                private void waitForData(long pos) {
+                                    int chunkIndex = (int) (pos / Constants.CHUNK_SIZE);
+                                    Set<Integer> downloaded = downloadedChunksCache.get(fileName);
+
+                                    if (downloaded != null) {
+                                        int waitTime = 0;
+                                        while (!downloaded.contains(chunkIndex) && waitTime < 30000) {
+                                            try { Thread.sleep(100); waitTime += 100; } catch (Exception e) {}
+                                        }
+                                    }
                                 }
                             };
-
                             ctx.result(is);
-
-                        } catch (Exception e) {
-                            ctx.status(500);
-                            e.printStackTrace();
                         }
                     });
 
@@ -205,6 +206,11 @@ public class HeadlessPeer {
             } catch (Exception e) {}
             synchronized (HeadlessPeer.class) { HeadlessPeer.class.wait(); }
         } catch (Exception e) { e.printStackTrace(); }
+    }
+
+    private static void serveFileStandard(io.javalin.http.Context ctx, File file) throws IOException {
+        ctx.contentType("video/mp4");
+        ctx.writeSeekableStream(new FileInputStream(file), "video/mp4");
     }
 
     public static void broadcastToWeb(String resultType, String fileName, long size, String hash, String peerIp) {
