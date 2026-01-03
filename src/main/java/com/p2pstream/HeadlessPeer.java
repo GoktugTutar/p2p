@@ -11,7 +11,7 @@ import io.javalin.Javalin;
 import io.javalin.http.staticfiles.Location;
 import io.javalin.websocket.WsContext;
 
-import java.io.File;
+import java.io.*;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -63,7 +63,7 @@ public class HeadlessPeer {
                         config.showJavalinBanner = false;
                     }).start(8080);
 
-                    // API ENDPOINTS
+                    // 1. CONNECT API
                     app.post("/api/connect", ctx -> {
                         if (!udpServer.isRunning()) { udpServer.start(); broadcastLog("UDP Server restarted."); }
                         int ttl = Constants.ttl;
@@ -72,12 +72,14 @@ public class HeadlessPeer {
                         ctx.result("HELLO Broadcast Sent");
                     });
 
+                    // 2. DISCONNECT API
                     app.post("/api/disconnect", ctx -> {
                         if (udpServer != null && udpServer.isRunning()) { udpServer.stop(); }
                         broadcastLog("Disconnected from network.");
                         ctx.result("Disconnected");
                     });
 
+                    // 3. SEARCH API
                     app.post("/api/search", ctx -> {
                         if (!udpServer.isRunning()) { ctx.status(400).result("Offline"); return; }
                         String query = ctx.queryParam("q");
@@ -87,6 +89,7 @@ public class HeadlessPeer {
                         ctx.result("OK");
                     });
 
+                    // 4. DOWNLOAD API
                     app.post("/api/download", ctx -> {
                         String fileName = ctx.queryParam("file");
                         String fileHash = ctx.queryParam("hash");
@@ -105,17 +108,90 @@ public class HeadlessPeer {
                         ctx.result("Download Started");
                     });
 
+                    // 5. STREAM API (MANUEL RANGE DESTEĞİ)
+                    // Tarayıcının parça parça (chunk geldikçe) videoyu istemesini sağlar.
                     app.get("/api/watch/{filename}", ctx -> {
-                        File buffer = new File(Constants.BUFFER_FOLDER + "/" + ctx.pathParam("filename"));
-                        File shared = new File(Constants.SHARED_FOLDER + "/" + ctx.pathParam("filename"));
-                        File target = buffer.exists() ? buffer : shared;
+                        String fileName = ctx.pathParam("filename");
+                        File bufferFile = new File(Constants.BUFFER_FOLDER + "/" + fileName);
+                        File sharedFile = new File(Constants.SHARED_FOLDER + "/" + fileName);
+                        // Eğer buffer'da varsa oradan oku (indirme devam ediyordur), yoksa shared'dan oku
+                        File targetFile = bufferFile.exists() ? bufferFile : sharedFile;
 
-                        if (target.exists()) {
-                            String fName = ctx.pathParam("filename");
-                            String mime = fName.endsWith(".mp4") ? "video/mp4" : "application/octet-stream";
-                            ctx.contentType(mime);
-                            ctx.writeSeekableStream(new java.io.FileInputStream(target), mime);
-                        } else { ctx.status(404).result("File not found"); }
+                        if (!targetFile.exists()) {
+                            ctx.status(404).result("File not found");
+                            return;
+                        }
+
+                        long fileLength = targetFile.length();
+                        String contentType = fileName.endsWith(".mp4") ? "video/mp4" : "application/octet-stream";
+
+                        // Tarayıcıdan gelen "Range" başlığını al (Örn: "bytes=0-" veya "bytes=1024-2048")
+                        String rangeHeader = ctx.header("Range");
+
+                        ctx.contentType(contentType);
+                        ctx.header("Accept-Ranges", "bytes"); // Tarayıcıya "Ben parça parça verebilirim" de.
+
+                        // Eğer Range başlığı yoksa tüm dosyayı gönder (200 OK)
+                        if (rangeHeader == null) {
+                            ctx.status(200);
+                            ctx.header("Content-Length", String.valueOf(fileLength));
+                            ctx.result(new FileInputStream(targetFile));
+                            return;
+                        }
+
+                        // Range varsa işle (206 Partial Content)
+                        try {
+                            String[] ranges = rangeHeader.replace("bytes=", "").split("-");
+                            long start = Long.parseLong(ranges[0]);
+                            // Bitiş belirtilmemişse dosyanın sonuna kadar al
+                            long end = ranges.length > 1 ? Long.parseLong(ranges[1]) : fileLength - 1;
+
+                            if (start > end || start >= fileLength) {
+                                ctx.status(416).header("Content-Range", "bytes */" + fileLength);
+                                return;
+                            }
+
+                            if (end >= fileLength) end = fileLength - 1;
+                            long contentLength = end - start + 1;
+
+                            // HTTP 206: Kısmi İçerik
+                            ctx.status(206);
+                            ctx.header("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
+                            ctx.header("Content-Length", String.valueOf(contentLength));
+
+                            // RandomAccessFile ile dosyanın tam istenen yerine (seek) git ve oku
+                            RandomAccessFile raf = new RandomAccessFile(targetFile, "r");
+                            raf.seek(start);
+
+                            // Javalin'e veriyi InputStream olarak ver
+                            InputStream is = new InputStream() {
+                                long bytesLeft = contentLength;
+                                @Override
+                                public int read() throws IOException {
+                                    if (bytesLeft <= 0) return -1;
+                                    int b = raf.read();
+                                    bytesLeft--;
+                                    return b;
+                                }
+                                @Override
+                                public int read(byte[] b, int off, int len) throws IOException {
+                                    if (bytesLeft <= 0) return -1;
+                                    int read = raf.read(b, off, (int) Math.min(len, bytesLeft));
+                                    if (read != -1) bytesLeft -= read;
+                                    return read;
+                                }
+                                @Override
+                                public void close() throws IOException {
+                                    raf.close();
+                                }
+                            };
+
+                            ctx.result(is);
+
+                        } catch (Exception e) {
+                            ctx.status(500);
+                            e.printStackTrace();
+                        }
                     });
 
                     app.ws("/ws", ws -> {
@@ -156,7 +232,6 @@ public class HeadlessPeer {
         sendJson(String.format("{\"type\":\"LOG\", \"message\":\"%s\"}", message));
     }
 
-    // GÜNCELLENEN METOD: Artık byte miktarlarını da gönderiyor
     public static void broadcastProgress(String hash, long current, long total, String status) {
         int percent = (total > 0) ? (int)((current * 100) / total) : 0;
         sendJson(String.format("{\"type\":\"PROGRESS\", \"hash\":\"%s\", \"current\":%d, \"total\":%d, \"percent\":%d, \"status\":\"%s\"}", hash, current, total, percent, status));

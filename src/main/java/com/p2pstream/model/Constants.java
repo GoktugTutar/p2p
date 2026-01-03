@@ -1,7 +1,7 @@
 package com.p2pstream.model;
 
 public class Constants {
-    public static final int ttl = 2;
+    public static final int ttl = 1;
     // UDP & TCP
     public static final int UDP_PORT = 50000;
     public static final int TCP_PORT = 50001;
