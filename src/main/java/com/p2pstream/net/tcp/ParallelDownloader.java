@@ -137,9 +137,6 @@ public class ParallelDownloader implements Runnable {
 
                         reportProgress();
 
-                        // --- 2. İSTEK: YAPAY YAVAŞLATMA (THROTTLING) ---
-                        // Her chunk indiğinde 300ms bekle.
-                        // Böylece 100 chunk'lık bir dosya yaklaşık 30 saniyede iner.
                         try { Thread.sleep(300); } catch (InterruptedException e) {}
 
                     } else {

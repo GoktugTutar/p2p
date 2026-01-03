@@ -24,7 +24,7 @@ public class TcpServer extends Thread {
                 OutputStream out = socket.getOutputStream()
         ) {
             String request;
-            // DÜZELTME: while döngüsü ile bağlantı kopana kadar istekleri dinle (Keep-Alive)
+            // while döngüsü ile bağlantı kopana kadar istekleri dinle (Keep-Alive)
             while ((request = in.readLine()) != null) {
                 String[] parts = request.split(":");
                 if (parts.length < 2) continue;
@@ -50,8 +50,8 @@ public class TcpServer extends Thread {
                 }
             }
         } catch (Exception e) {
-            // Bağlantı koptuğunda buraya düşer, normaldir.
-            // System.out.println("Bağlantı sonlandı: " + socket.getInetAddress());
+            // Bağlantı koptuğunda buraya düşer
+            System.out.println("connection ended: " + socket.getInetAddress());
         } finally {
             try { socket.close(); } catch (IOException e) {}
         }
