@@ -4,7 +4,6 @@ import java.io.Serializable;
 import java.util.Objects;
 
 public final class VideoMetadata implements Serializable {
-    // PDF Gereksinimi: Dosyaları benzersiz tanımlamak için Hash kullanın
     private final String fileHash; // SHA-256 (Hex formatında tutmak daha kolaydır)
     private final String fileName;
     private final long fileSize;

@@ -29,7 +29,6 @@ public class TcpClient implements Runnable {
 
         System.out.println("⬇️ TCP İndirme Başlıyor: " + fileName + " Kaynak: " + targetIp);
 
-        // DÜZELTME 1: Parametre sayısı güncellendi (0, totalSize)
         HeadlessPeer.broadcastProgress(fileHash, 0, totalSize, "Connecting...");
 
         try (Socket socket = new Socket(targetIp, Constants.TCP_PORT);
@@ -67,13 +66,13 @@ public class TcpClient implements Runnable {
             System.out.println("✅ Dosya başarıyla kaydedildi: " + finalFile.getAbsolutePath());
             HeadlessPeer.broadcastLog("Download Completed: " + fileName);
 
-            // DÜZELTME 4: Tamamlandı durumu
+            // Tamamlandı durumu
             HeadlessPeer.broadcastProgress(fileHash, totalSize, totalSize, "Completed");
 
         } catch (IOException e) {
             System.err.println("TCP İndirme Hatası: " + e.getMessage());
             HeadlessPeer.broadcastLog("Download Failed: " + e.getMessage());
-            // DÜZELTME 5: Hata durumu
+            // Hata durumu
             HeadlessPeer.broadcastProgress(fileHash, 0, totalSize, "Error");
         }
     }

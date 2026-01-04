@@ -34,23 +34,6 @@ public class MyUdpHandler implements UdpPacketHandler {
         this.myPort = myPort;
     }
 
-    @Override
-    public void handlePacket(DatagramPacket datagramPacket) {
-        try {
-            Packet packet = PacketCodec.decode(datagramPacket.getData(), datagramPacket.getLength());
-            if (packet.myIp.equals(this.myIp)) return;
-            knownPeers.add(packet.myIp);
-
-            switch (packet.messageType) {
-                case HELLO: handleHello(packet, datagramPacket.getAddress(), datagramPacket.getPort()); break;
-                case DISCOVER: handleDiscover(packet, datagramPacket.getAddress(), datagramPacket.getPort()); break;
-                case DISCOVER_REPLY: handleDiscoverReply(packet, datagramPacket.getAddress(), datagramPacket.getPort()); break;
-                case SEARCH: handleSearch(packet, datagramPacket.getAddress(), datagramPacket.getPort()); break;
-                case SEARCH_REPLY: handleSearchReply(packet, datagramPacket.getAddress(), datagramPacket.getPort()); break;
-            }
-        } catch (Exception e) { e.printStackTrace(); }
-    }
-
     // --- 1. HELLO (Doğrudan Komşu) ---
     @Override
     public void handleHello(Packet packet, InetAddress sender, int senderPort) {
@@ -84,7 +67,6 @@ public class MyUdpHandler implements UdpPacketHandler {
         forwardPacket(packet);
 
         // B. EKSİK OLAN KISIM BURASIYDI: BEN DE ONA CEVAP VERMELİYİM
-        // Node 10 burada devreye girip "Hoşgeldin, ben de buradayım" diyecek.
         sendMyFileList(newPeerIp, MessageType.DISCOVER_REPLY);
     }
 

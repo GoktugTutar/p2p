@@ -170,7 +170,7 @@ public class ParallelDownloader implements Runnable {
 
                 out.println(fileName + ":" + chunkId);
                 byte[] data = new byte[Constants.CHUNK_SIZE];
-                // Basit okuma (Retry için detaylı döngüye gerek duymadık şimdilik)
+                // Basit okuma
                 int read = in.read(data);
 
                 if (read > 0) {
